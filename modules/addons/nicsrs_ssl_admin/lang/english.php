@@ -1,0 +1,135 @@
+<?php
+/**
+ * English Language File
+ * 
+ * @package    nicsrs_ssl_admin
+ * @author     HVN GROUP
+ * @copyright  Copyright (c) HVN GROUP (https://hvn.vn)
+ */
+
+$lang = [
+    // General
+    'module_name' => 'NicSRS SSL Admin',
+    'dashboard' => 'Dashboard',
+    'products' => 'Products',
+    'orders' => 'Orders',
+    'settings' => 'Settings',
+    'save' => 'Save',
+    'cancel' => 'Cancel',
+    'confirm' => 'Confirm',
+    'delete' => 'Delete',
+    'edit' => 'Edit',
+    'view' => 'View',
+    'search' => 'Search',
+    'filter' => 'Filter',
+    'refresh' => 'Refresh',
+    'export' => 'Export',
+    'import' => 'Import',
+    'back' => 'Back',
+    'actions' => 'Actions',
+    'status' => 'Status',
+    'date' => 'Date',
+    'yes' => 'Yes',
+    'no' => 'No',
+    'all' => 'All',
+    'none' => 'None',
+    'loading' => 'Loading...',
+    'processing' => 'Processing...',
+    'success' => 'Success',
+    'error' => 'Error',
+    'warning' => 'Warning',
+    'info' => 'Information',
+
+    // Dashboard
+    'dashboard_title' => 'SSL Dashboard',
+    'total_orders' => 'Total Orders',
+    'pending_orders' => 'Pending Orders',
+    'issued_certs' => 'Issued Certificates',
+    'expiring_soon' => 'Expiring Soon',
+    'recent_orders' => 'Recent Orders',
+    'status_distribution' => 'Status Distribution',
+    'monthly_orders' => 'Monthly Orders',
+    'api_not_connected' => 'API Not Connected',
+    'api_connected' => 'API Connected',
+
+    // Products
+    'product_list' => 'Product List',
+    'product_code' => 'Product Code',
+    'product_name' => 'Product Name',
+    'vendor' => 'Vendor',
+    'validation_type' => 'Validation Type',
+    'wildcard' => 'Wildcard',
+    'san_support' => 'SAN Support',
+    'max_domains' => 'Max Domains',
+    'price' => 'Price',
+    'sync_products' => 'Sync Products',
+    'sync_all_products' => 'Sync All Products',
+    'last_sync' => 'Last Sync',
+    'no_products' => 'No products found',
+
+    // Orders
+    'order_list' => 'Order List',
+    'order_id' => 'Order ID',
+    'remote_id' => 'Remote ID',
+    'domain' => 'Domain',
+    'client' => 'Client',
+    'product' => 'Product',
+    'created' => 'Created',
+    'expires' => 'Expires',
+    'days_left' => 'Days Left',
+    'order_detail' => 'Order Detail',
+    'certificate_info' => 'Certificate Information',
+    'domain_validation' => 'Domain Validation',
+    'activity_log' => 'Activity Log',
+    'no_orders' => 'No orders found',
+
+    // Order Status
+    'status_awaiting' => 'Awaiting Configuration',
+    'status_draft' => 'Draft',
+    'status_pending' => 'Pending Validation',
+    'status_complete' => 'Complete',
+    'status_cancelled' => 'Cancelled',
+    'status_revoked' => 'Revoked',
+    'status_expired' => 'Expired',
+
+    // Actions
+    'refresh_status' => 'Refresh Status',
+    'cancel_order' => 'Cancel Order',
+    'revoke_certificate' => 'Revoke Certificate',
+    'reissue_certificate' => 'Reissue Certificate',
+    'renew_certificate' => 'Renew Certificate',
+    'resend_dcv' => 'Resend DCV Email',
+    'download_certificate' => 'Download Certificate',
+
+    // Settings
+    'api_configuration' => 'API Configuration',
+    'api_token' => 'API Token',
+    'test_connection' => 'Test Connection',
+    'notification_settings' => 'Notification Settings',
+    'email_on_issuance' => 'Email on certificate issuance',
+    'email_on_expiry' => 'Email before certificate expiry',
+    'expiry_days' => 'Expiry warning days',
+    'admin_email' => 'Admin Email',
+    'sync_settings' => 'Sync Settings',
+    'auto_sync' => 'Enable automatic sync',
+    'sync_interval' => 'Sync interval (hours)',
+    'display_settings' => 'Display Settings',
+    'date_format' => 'Date Format',
+    'clear_logs' => 'Clear Logs',
+    'export_logs' => 'Export Logs',
+
+    // Messages
+    'msg_settings_saved' => 'Settings saved successfully',
+    'msg_api_connected' => 'API connection successful',
+    'msg_api_failed' => 'API connection failed',
+    'msg_products_synced' => 'Products synced successfully',
+    'msg_status_refreshed' => 'Status refreshed successfully',
+    'msg_order_cancelled' => 'Order cancelled successfully',
+    'msg_cert_revoked' => 'Certificate revoked successfully',
+    'msg_reissue_submitted' => 'Reissue request submitted',
+    'msg_renewal_submitted' => 'Renewal request submitted',
+    'msg_dcv_resent' => 'DCV email resent successfully',
+    'msg_logs_cleared' => 'Activity logs cleared',
+    'msg_confirm_cancel' => 'Are you sure you want to cancel this order?',
+    'msg_confirm_revoke' => 'Are you sure you want to revoke this certificate? This action cannot be undone.',
+];

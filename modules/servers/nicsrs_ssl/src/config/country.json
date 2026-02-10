@@ -1,0 +1,1903 @@
+[
+  {
+    "code": "AD",
+    "lang": "UNK",
+    "level": "country",
+    "name": "Andorra",
+    "pid": 1,
+    "id": 23424744
+  },
+  {
+    "code": "AE",
+    "lang": "ARA",
+    "level": "country",
+    "name": "الامارات",
+    "pid": 1,
+    "id": 23424738
+  },
+  {
+    "code": "AG",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Antigua and Barbuda",
+    "pid": 1,
+    "id": 23424737
+  },
+  {
+    "code": "AI",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Anguilla",
+    "pid": 1,
+    "id": 23424751
+  },
+  {
+    "code": "AL",
+    "lang": "UNK",
+    "level": "country",
+    "name": "Shqipëri",
+    "pid": 1,
+    "id": 23424742
+  },
+  {
+    "code": "AM",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Armenia",
+    "pid": 1,
+    "id": 23424743
+  },
+  {
+    "code": "AO",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Angola",
+    "pid": 1,
+    "id": 23424745
+  },
+  {
+    "code": "AQ",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Antarctica",
+    "pid": 1,
+    "id": 28289409
+  },
+  {
+    "code": "AR",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Argentina",
+    "pid": 1,
+    "id": 23424747
+  },
+  {
+    "code": "AS",
+    "lang": "ENG",
+    "level": "country",
+    "name": "American Samoa",
+    "pid": 1,
+    "id": 23424746
+  },
+  {
+    "code": "AT",
+    "lang": "GER",
+    "level": "country",
+    "name": "Österreich",
+    "pid": 1,
+    "id": 23424750
+  },
+  {
+    "code": "AU",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Australia",
+    "pid": 1,
+    "id": 23424748
+  },
+  {
+    "code": "AW",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Aruba",
+    "pid": 1,
+    "id": 23424736
+  },
+  {
+    "code": "AX",
+    "lang": "SWE",
+    "level": "country",
+    "name": "Åland",
+    "pid": 1,
+    "id": 12577865
+  },
+  {
+    "code": "AZ",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Azerbaijan",
+    "pid": 1,
+    "id": 23424741
+  },
+  {
+    "code": "BA",
+    "lang": "UNK",
+    "level": "country",
+    "name": "Bosna i Hercegovina",
+    "pid": 1,
+    "id": 23424761
+  },
+  {
+    "code": "BB",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Barbados",
+    "pid": 1,
+    "id": 23424754
+  },
+  {
+    "code": "BD",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Bangladesh",
+    "pid": 1,
+    "id": 23424759
+  },
+  {
+    "code": "BE",
+    "lang": "DUT",
+    "level": "country",
+    "name": "België",
+    "pid": 1,
+    "id": 23424757
+  },
+  {
+    "code": "BF",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Burkina Faso",
+    "pid": 1,
+    "id": 23424978
+  },
+  {
+    "code": "BG",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Bulgaria",
+    "pid": 1,
+    "id": 23424771
+  },
+  {
+    "code": "BH",
+    "lang": "ARA",
+    "level": "country",
+    "name": "البحرين",
+    "pid": 1,
+    "id": 23424753
+  },
+  {
+    "code": "BI",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Burundi",
+    "pid": 1,
+    "id": 23424774
+  },
+  {
+    "code": "BJ",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Benin",
+    "pid": 1,
+    "id": 23424764
+  },
+  {
+    "code": "BL",
+    "lang": "FRE",
+    "level": "country",
+    "name": "Saint-Barthélemy",
+    "pid": 1,
+    "id": 56042304
+  },
+  {
+    "code": "BM",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Bermuda",
+    "pid": 1,
+    "id": 23424756
+  },
+  {
+    "code": "BN",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Brunei",
+    "pid": 1,
+    "id": 23424773
+  },
+  {
+    "code": "BO",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Bolivia",
+    "pid": 1,
+    "id": 23424762
+  },
+  {
+    "code": "BQ",
+    "lang": "DUT",
+    "level": "country",
+    "name": "Bonaire Saint Eustatius and Saba",
+    "pid": 1,
+    "id": 56558056
+  },
+  {
+    "code": "BR",
+    "lang": "POR",
+    "level": "country",
+    "name": "Brasil",
+    "pid": 1,
+    "id": 23424768
+  },
+  {
+    "code": "BS",
+    "lang": "ENG",
+    "level": "country",
+    "name": "The Bahamas",
+    "pid": 1,
+    "id": 23424758
+  },
+  {
+    "code": "BT",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Bhutan",
+    "pid": 1,
+    "id": 23424770
+  },
+  {
+    "code": "BV",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Bouvet Island",
+    "pid": 1,
+    "id": 28289410
+  },
+  {
+    "code": "BW",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Botswana",
+    "pid": 1,
+    "id": 23424755
+  },
+  {
+    "code": "BZ",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Belize",
+    "pid": 1,
+    "id": 23424760
+  },
+  {
+    "code": "CA",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Canada",
+    "pid": 1,
+    "id": 23424775
+  },
+  {
+    "code": "CC",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Cocos (Keeling) Islands",
+    "pid": 1,
+    "id": 23424784
+  },
+  {
+    "code": "CD",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Democratic Republic of Congo",
+    "pid": 1,
+    "id": 23424780
+  },
+  {
+    "code": "CF",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Central African Republic",
+    "pid": 1,
+    "id": 23424792
+  },
+  {
+    "code": "CG",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Congo",
+    "pid": 1,
+    "id": 23424779
+  },
+  {
+    "code": "CH",
+    "lang": "GER",
+    "level": "country",
+    "name": "Schweiz",
+    "pid": 1,
+    "id": 23424957
+  },
+  {
+    "code": "CI",
+    "lang": "FRE",
+    "level": "country",
+    "name": "Côte d´Ivoire",
+    "pid": 1,
+    "id": 23424854
+  },
+  {
+    "code": "CK",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Cook Islands",
+    "pid": 1,
+    "id": 23424795
+  },
+  {
+    "code": "CL",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Chile",
+    "pid": 1,
+    "id": 23424782
+  },
+  {
+    "code": "CM",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Cameroon",
+    "pid": 1,
+    "id": 23424785
+  },
+  {
+    "code": "CO",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Colombia",
+    "pid": 1,
+    "id": 23424787
+  },
+  {
+    "code": "CR",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Costa Rica",
+    "pid": 1,
+    "id": 23424791
+  },
+  {
+    "code": "CV",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Cape Verde",
+    "pid": 1,
+    "id": 23424794
+  },
+  {
+    "code": "CW",
+    "lang": "DUT",
+    "level": "country",
+    "name": "Curaçao",
+    "pid": 1,
+    "id": 56558057
+  },
+  {
+    "code": "CX",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Christmas Island",
+    "pid": 1,
+    "id": 23424869
+  },
+  {
+    "code": "CY",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Cyprus",
+    "pid": 1,
+    "id": 26812346
+  },
+  {
+    "code": "CZ",
+    "lang": "CZE",
+    "level": "country",
+    "name": "Česká republika",
+    "pid": 1,
+    "id": 23424810
+  },
+  {
+    "code": "DE",
+    "lang": "GER",
+    "level": "country",
+    "name": "Deutschland",
+    "pid": 1,
+    "id": 23424829
+  },
+  {
+    "code": "DJ",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Djibouti",
+    "pid": 1,
+    "id": 23424797
+  },
+  {
+    "code": "DK",
+    "lang": "DAN",
+    "level": "country",
+    "name": "Danmark",
+    "pid": 1,
+    "id": 23424796
+  },
+  {
+    "code": "DM",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Dominica",
+    "pid": 1,
+    "id": 23424798
+  },
+  {
+    "code": "DO",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Dominican Republic",
+    "pid": 1,
+    "id": 23424800
+  },
+  {
+    "code": "DZ",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Algeria",
+    "pid": 1,
+    "id": 23424740
+  },
+  {
+    "code": "EC",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Ecuador",
+    "pid": 1,
+    "id": 23424801
+  },
+  {
+    "code": "EE",
+    "lang": "UNK",
+    "level": "country",
+    "name": "Eesti",
+    "pid": 1,
+    "id": 23424805
+  },
+  {
+    "code": "EG",
+    "lang": "ARA",
+    "level": "country",
+    "name": "مصر",
+    "pid": 1,
+    "id": 23424802
+  },
+  {
+    "code": "EH",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Western Sahara",
+    "pid": 1,
+    "id": 23424990
+  },
+  {
+    "code": "ES",
+    "lang": "SPA",
+    "level": "country",
+    "name": "España",
+    "pid": 1,
+    "id": 23424950
+  },
+  {
+    "code": "ET",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Ethiopia",
+    "pid": 1,
+    "id": 23424808
+  },
+  {
+    "code": "FI",
+    "lang": "FIN",
+    "level": "country",
+    "name": "Suomi",
+    "pid": 1,
+    "id": 23424812
+  },
+  {
+    "code": "FJ",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Fiji",
+    "pid": 1,
+    "id": 23424813
+  },
+  {
+    "code": "FK",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Falkland Islands",
+    "pid": 1,
+    "id": 23424814
+  },
+  {
+    "code": "FM",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Federated States of Micronesia",
+    "pid": 1,
+    "id": 23424815
+  },
+  {
+    "code": "FO",
+    "lang": "UNK",
+    "level": "country",
+    "name": "Føroyar",
+    "pid": 1,
+    "id": 23424816
+  },
+  {
+    "code": "FR",
+    "lang": "FRE",
+    "level": "country",
+    "name": "France",
+    "pid": 1,
+    "id": 23424819
+  },
+  {
+    "code": "GA",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Gabon",
+    "pid": 1,
+    "id": 23424822
+  },
+  {
+    "code": "GB",
+    "lang": "ENG",
+    "level": "country",
+    "name": "United Kingdom",
+    "pid": 1,
+    "id": 23424975
+  },
+  {
+    "code": "GD",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Grenada",
+    "pid": 1,
+    "id": 23424826
+  },
+  {
+    "code": "GE",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Georgia",
+    "pid": 1,
+    "id": 23424823
+  },
+  {
+    "code": "GF",
+    "lang": "FRE",
+    "level": "country",
+    "name": "Guyane Française",
+    "pid": 1,
+    "id": 23424811
+  },
+  {
+    "code": "GH",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Ghana",
+    "pid": 1,
+    "id": 23424824
+  },
+  {
+    "code": "GI",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Gibraltar",
+    "pid": 1,
+    "id": 23424825
+  },
+  {
+    "code": "GL",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Greenland",
+    "pid": 1,
+    "id": 23424828
+  },
+  {
+    "code": "GM",
+    "lang": "ENG",
+    "level": "country",
+    "name": "The Gambia",
+    "pid": 1,
+    "id": 23424821
+  },
+  {
+    "code": "GP",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Guadeloupe",
+    "pid": 1,
+    "id": 23424831
+  },
+  {
+    "code": "GQ",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Equatorial Guinea",
+    "pid": 1,
+    "id": 23424804
+  },
+  {
+    "code": "GR",
+    "lang": "UNK",
+    "level": "country",
+    "name": "Ellás",
+    "pid": 1,
+    "id": 23424833
+  },
+  {
+    "code": "GS",
+    "lang": "ENG",
+    "level": "country",
+    "name": "South Georgia and the South Sandwich Islands",
+    "pid": 1,
+    "id": 23424955
+  },
+  {
+    "code": "GT",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Guatemala",
+    "pid": 1,
+    "id": 23424834
+  },
+  {
+    "code": "GU",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Guam",
+    "pid": 1,
+    "id": 23424832
+  },
+  {
+    "code": "GW",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Guinea-Bissau",
+    "pid": 1,
+    "id": 23424929
+  },
+  {
+    "code": "GY",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Guyana",
+    "pid": 1,
+    "id": 23424836
+  },
+  {
+    "code": "HK",
+    "lang": "CHI",
+    "level": "country",
+    "name": "香港",
+    "pid": 1,
+    "id": 24865698
+  },
+  {
+    "code": "HM",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Heard Island and McDonald Islands",
+    "pid": 1,
+    "id": 28289411
+  },
+  {
+    "code": "HN",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Honduras",
+    "pid": 1,
+    "id": 23424841
+  },
+  {
+    "code": "HT",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Haiti",
+    "pid": 1,
+    "id": 23424839
+  },
+  {
+    "code": "HU",
+    "lang": "HUN",
+    "level": "country",
+    "name": "Magyarország",
+    "pid": 1,
+    "id": 23424844
+  },
+  {
+    "code": "HR",
+    "lang": "UNK",
+    "level": "country",
+    "name": "Hrvatska",
+    "pid": 1,
+    "id": 23424843
+  },
+  {
+    "code": "ID",
+    "lang": "UNK",
+    "level": "country",
+    "name": "Republik Indonesia",
+    "pid": 1,
+    "id": 23424846
+  },
+  {
+    "code": "IE",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Ireland",
+    "pid": 1,
+    "id": 23424803
+  },
+  {
+    "code": "IS",
+    "lang": "UNK",
+    "level": "country",
+    "name": "Ísland",
+    "pid": 1,
+    "id": 23424845
+  },
+  {
+    "code": "IO",
+    "lang": "ENG",
+    "level": "country",
+    "name": "British Indian Ocean Territory",
+    "pid": 1,
+    "id": 23424849
+  },
+  {
+    "code": "IT",
+    "lang": "ITA",
+    "level": "country",
+    "name": "Italia",
+    "pid": 1,
+    "id": 23424853
+  },
+  {
+    "code": "IN",
+    "lang": "ENG",
+    "level": "country",
+    "name": "India",
+    "pid": 1,
+    "id": 23424848
+  },
+  {
+    "code": "IL",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Israel",
+    "pid": 1,
+    "id": 23424852
+  },
+  {
+    "code": "IQ",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Iraq",
+    "pid": 1,
+    "id": 23424855
+  },
+  {
+    "code": "JP",
+    "lang": "JPN",
+    "level": "country",
+    "name": "日本",
+    "pid": 1,
+    "id": 23424856
+  },
+  {
+    "code": "JM",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Jamaica",
+    "pid": 1,
+    "id": 23424858
+  },
+  {
+    "code": "JO",
+    "lang": "ARA",
+    "level": "country",
+    "name": "الأردن",
+    "pid": 1,
+    "id": 23424860
+  },
+  {
+    "code": "KN",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Saint Kitts and Nevis",
+    "pid": 1,
+    "id": 23424940
+  },
+  {
+    "code": "KE",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Kenya",
+    "pid": 1,
+    "id": 23424863
+  },
+  {
+    "code": "KI",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Kiribati",
+    "pid": 1,
+    "id": 23424867
+  },
+  {
+    "code": "KG",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Kyrgyzstan",
+    "pid": 1,
+    "id": 23424864
+  },
+  {
+    "code": "KY",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Cayman Islands",
+    "pid": 1,
+    "id": 23424783
+  },
+  {
+    "code": "KH",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Cambodia",
+    "pid": 1,
+    "id": 23424776
+  },
+  {
+    "code": "KM",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Comoros",
+    "pid": 1,
+    "id": 23424786
+  },
+  {
+    "code": "KR",
+    "lang": "KOR",
+    "level": "country",
+    "name": "한국",
+    "pid": 1,
+    "id": 23424868
+  },
+  {
+    "code": "KW",
+    "lang": "ARA",
+    "level": "country",
+    "name": "الكويت",
+    "pid": 1,
+    "id": 23424870
+  },
+  {
+    "code": "KZ",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Kazakhstan",
+    "pid": 1,
+    "id": 23424871
+  },
+  {
+    "code": "LA",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Laos",
+    "pid": 1,
+    "id": 23424872
+  },
+  {
+    "code": "LB",
+    "lang": "ARA",
+    "level": "country",
+    "name": "لبنان",
+    "pid": 1,
+    "id": 23424873
+  },
+  {
+    "code": "LC",
+    "lang": "ENG",
+    "level": "country",
+    "name": "St. Lucia",
+    "pid": 1,
+    "id": 23424951
+  },
+  {
+    "code": "LS",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Lesotho",
+    "pid": 1,
+    "id": 23424880
+  },
+  {
+    "code": "LY",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Libya",
+    "pid": 1,
+    "id": 23424882
+  },
+  {
+    "code": "LK",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Sri Lanka",
+    "pid": 1,
+    "id": 23424778
+  },
+  {
+    "code": "LT",
+    "lang": "UNK",
+    "level": "country",
+    "name": "Lietuva",
+    "pid": 1,
+    "id": 23424875
+  },
+  {
+    "code": "LI",
+    "lang": "GER",
+    "level": "country",
+    "name": "Liechtenstein",
+    "pid": 1,
+    "id": 23424879
+  },
+  {
+    "code": "LV",
+    "lang": "UNK",
+    "level": "country",
+    "name": "Latvija",
+    "pid": 1,
+    "id": 23424874
+  },
+  {
+    "code": "LU",
+    "lang": "FRE",
+    "level": "country",
+    "name": "Luxembourg",
+    "pid": 1,
+    "id": 23424881
+  },
+  {
+    "code": "MP",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Northern Mariana Islands",
+    "pid": 1,
+    "id": 23424788
+  },
+  {
+    "code": "MG",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Madagascar",
+    "pid": 1,
+    "id": 23424883
+  },
+  {
+    "code": "MW",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Malawi",
+    "pid": 1,
+    "id": 23424889
+  },
+  {
+    "code": "ML",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Mali",
+    "pid": 1,
+    "id": 23424891
+  },
+  {
+    "code": "MA",
+    "lang": "ARA",
+    "level": "country",
+    "name": "المغرب",
+    "pid": 1,
+    "id": 23424893
+  },
+  {
+    "code": "MT",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Malta",
+    "pid": 1,
+    "id": 23424897
+  },
+  {
+    "code": "MU",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Mauritius",
+    "pid": 1,
+    "id": 23424894
+  },
+  {
+    "code": "MY",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Malaysia",
+    "pid": 1,
+    "id": 23424901
+  },
+  {
+    "code": "MM",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Myanmar",
+    "pid": 1,
+    "id": 23424763
+  },
+  {
+    "code": "MD",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Moldova",
+    "pid": 1,
+    "id": 23424885
+  },
+  {
+    "code": "MN",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Mongolia",
+    "pid": 1,
+    "id": 23424887
+  },
+  {
+    "code": "MQ",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Martinique",
+    "pid": 1,
+    "id": 23424884
+  },
+  {
+    "code": "MS",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Montserrat",
+    "pid": 1,
+    "id": 23424888
+  },
+  {
+    "code": "MK",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Macedonia",
+    "pid": 1,
+    "id": 23424890
+  },
+  {
+    "code": "MC",
+    "lang": "FRE",
+    "level": "country",
+    "name": "Monaco",
+    "pid": 1,
+    "id": 23424892
+  },
+  {
+    "code": "MV",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Maldives",
+    "pid": 1,
+    "id": 23424899
+  },
+  {
+    "code": "MR",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Mauritania",
+    "pid": 1,
+    "id": 23424896
+  },
+  {
+    "code": "MX",
+    "lang": "SPA",
+    "level": "country",
+    "name": "México",
+    "pid": 1,
+    "id": 23424900
+  },
+  {
+    "code": "MZ",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Mozambique",
+    "pid": 1,
+    "id": 23424902
+  },
+  {
+    "code": "ME",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Montenegro",
+    "pid": 1,
+    "id": 20069817
+  },
+  {
+    "code": "MH",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Marshall Islands",
+    "pid": 1,
+    "id": 23424932
+  },
+  {
+    "code": "MF",
+    "lang": "FRE",
+    "level": "country",
+    "name": "Saint-Martin",
+    "pid": 1,
+    "id": 56042305
+  },
+  {
+    "code": "MO",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Macau",
+    "pid": 1,
+    "id": 20070017
+  },
+  {
+    "code": "NA",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Namibia",
+    "pid": 1,
+    "id": 23424987
+  },
+  {
+    "code": "NC",
+    "lang": "ENG",
+    "level": "country",
+    "name": "New Caledonia",
+    "pid": 1,
+    "id": 23424903
+  },
+  {
+    "code": "NL",
+    "lang": "DUT",
+    "level": "country",
+    "name": "Nederland",
+    "pid": 1,
+    "id": 23424909
+  },
+  {
+    "code": "NP",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Nepal",
+    "pid": 1,
+    "id": 23424911
+  },
+  {
+    "code": "NZ",
+    "lang": "ENG",
+    "level": "country",
+    "name": "New Zealand",
+    "pid": 1,
+    "id": 23424916
+  },
+  {
+    "code": "NG",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Nigeria",
+    "pid": 1,
+    "id": 23424908
+  },
+  {
+    "code": "NF",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Norfolk Island",
+    "pid": 1,
+    "id": 23424905
+  },
+  {
+    "code": "NU",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Niue",
+    "pid": 1,
+    "id": 23424904
+  },
+  {
+    "code": "NE",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Niger",
+    "pid": 1,
+    "id": 23424906
+  },
+  {
+    "code": "NO",
+    "lang": "NOR",
+    "level": "country",
+    "name": "Norge",
+    "pid": 1,
+    "id": 23424910
+  },
+  {
+    "code": "NR",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Nauru",
+    "pid": 1,
+    "id": 23424912
+  },
+  {
+    "code": "NI",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Nicaragua",
+    "pid": 1,
+    "id": 23424915
+  },
+  {
+    "code": "OM",
+    "lang": "ARA",
+    "level": "country",
+    "name": "عمان",
+    "pid": 1,
+    "id": 23424898
+  },
+  {
+    "code": "PF",
+    "lang": "ENG",
+    "level": "country",
+    "name": "French Polynesia",
+    "pid": 1,
+    "id": 23424817
+  },
+  {
+    "code": "PN",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Pitcairn Islands",
+    "pid": 1,
+    "id": 23424918
+  },
+  {
+    "code": "PK",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Pakistan",
+    "pid": 1,
+    "id": 23424922
+  },
+  {
+    "code": "PA",
+    "lang": "SPA",
+    "level": "country",
+    "name": "Panamá",
+    "pid": 1,
+    "id": 23424924
+  },
+
+  {
+    "code": "PG",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Papua New Guinea",
+    "pid": 1,
+    "id": 23424926
+  },
+  {
+    "code": "PH",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Philippines",
+    "pid": 1,
+    "id": 23424934
+  },
+  {
+    "code": "PY",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Paraguay",
+    "pid": 1,
+    "id": 23424917
+  },
+  {
+    "code": "PE",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Peru",
+    "pid": 1,
+    "id": 23424919
+  },
+  {
+    "code": "PL",
+    "lang": "POL",
+    "level": "country",
+    "name": "Polska",
+    "pid": 1,
+    "id": 23424923
+  },
+  {
+    "code": "PW",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Palau",
+    "pid": 1,
+    "id": 23424927
+  },
+  {
+    "code": "PR",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Puerto Rico",
+    "pid": 1,
+    "id": 23424935
+  },
+  {
+    "code": "PM",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Saint Pierre and Miquelon",
+    "pid": 1,
+    "id": 23424939
+  },
+  {
+    "code": "PT",
+    "lang": "POR",
+    "level": "country",
+    "name": "Portugal",
+    "pid": 1,
+    "id": 23424925
+  },
+  {
+    "code": "PS",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Palestine",
+    "pid": 1,
+    "id": 28289408
+  },
+  {
+    "code": "QA",
+    "lang": "ARA",
+    "level": "country",
+    "name": "قطر",
+    "pid": 1,
+    "id": 23424930
+  },
+  {
+    "code": "RE",
+    "lang": "FRE",
+    "level": "country",
+    "name": "La Réunion",
+    "pid": 1,
+    "id": 23424931
+  },
+  {
+    "code": "RO",
+    "lang": "RUM",
+    "level": "country",
+    "name": "România",
+    "pid": 1,
+    "id": 23424933
+  },
+  {
+    "code": "RW",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Rwanda",
+    "pid": 1,
+    "id": 23424937
+  },
+  {
+    "code": "RS",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Serbia",
+    "pid": 1,
+    "id": 20069818
+  },
+  {
+    "code": "SA",
+    "lang": "ARA",
+    "level": "country",
+    "name": "السعودية",
+    "pid": 1,
+    "id": 23424938
+  },
+  {
+    "code": "SB",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Solomon Islands",
+    "pid": 1,
+    "id": 23424766
+  },
+  {
+    "code": "SV",
+    "lang": "ENG",
+    "level": "country",
+    "name": "El Salvador",
+    "pid": 1,
+    "id": 23424807
+  },
+  {
+    "code": "SR",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Suriname",
+    "pid": 1,
+    "id": 23424913
+  },
+
+  {
+    "code": "SK",
+    "lang": "UNK",
+    "level": "country",
+    "name": "Slovenská",
+    "pid": 1,
+    "id": 23424877
+  },
+  {
+    "code": "SN",
+    "lang": "FRE",
+    "level": "country",
+    "name": "Sénégal",
+    "pid": 1,
+    "id": 23424943
+  },
+  {
+    "code": "SM",
+    "lang": "ITA",
+    "level": "country",
+    "name": "San Marino",
+    "pid": 1,
+    "id": 23424947
+  },
+  {
+    "code": "SH",
+    "lang": "ENG",
+    "level": "country",
+    "name": "St Helena Ascension and Tristan da Cunha",
+    "pid": 1,
+    "id": 23424944
+  },
+  {
+    "code": "SL",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Sierra Leone",
+    "pid": 1,
+    "id": 23424946
+  },
+  {
+    "code": "SC",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Seychelles",
+    "pid": 1,
+    "id": 23424941
+  },
+  {
+    "code": "SI",
+    "lang": "UNK",
+    "level": "country",
+    "name": "Slovenija",
+    "pid": 1,
+    "id": 23424945
+  },
+  {
+    "code": "SO",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Somalia",
+    "pid": 1,
+    "id": 23424949
+  },
+  {
+    "code": "SD",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Sudan",
+    "pid": 1,
+    "id": 23424952
+  },
+  {
+    "code": "SJ",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Svalbard and Jan Mayen",
+    "pid": 1,
+    "id": 28289413
+  },
+  {
+    "code": "ST",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Sao Tome and Principe",
+    "pid": 1,
+    "id": 23424966
+  },
+  {
+    "code": "SE",
+    "lang": "SWE",
+    "level": "country",
+    "name": "Sverige",
+    "pid": 1,
+    "id": 23424954
+  },
+  {
+    "code": "SG",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Singapore",
+    "pid": 1,
+    "id": 23424948
+  },
+  {
+    "code": "SZ",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Swaziland",
+    "pid": 1,
+    "id": 23424993
+  },
+  {
+    "code": "SX",
+    "lang": "DUT",
+    "level": "country",
+    "name": "Sint Maarten",
+    "pid": 1,
+    "id": 56558058
+  },
+
+  {
+    "code": "TD",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Chad",
+    "pid": 1,
+    "id": 23424777
+  },
+  {
+    "code": "TK",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Tokelau",
+    "pid": 1,
+    "id": 23424963
+  },
+  {
+    "code": "TN",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Tunisia",
+    "pid": 1,
+    "id": 23424967
+  },
+
+  {
+    "code": "TJ",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Tajikistan",
+    "pid": 1,
+    "id": 23424961
+  },
+  {
+    "code": "TT",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Trinidad and Tobago",
+    "pid": 1,
+    "id": 23424958
+  },
+  {
+    "code": "TC",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Turks and Caicos Islands",
+    "pid": 1,
+    "id": 23424962
+  },
+  {
+    "code": "TO",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Tonga",
+    "pid": 1,
+    "id": 23424964
+  },
+  {
+    "code": "TG",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Togo",
+    "pid": 1,
+    "id": 23424965
+  },
+  {
+    "code": "TR",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Turkey",
+    "pid": 1,
+    "id": 23424969
+  },
+  {
+    "code": "TW",
+    "lang": "CHI",
+    "level": "country",
+    "name": "臺灣",
+    "pid": 1,
+    "id": 23424971
+  },
+  {
+    "code": "TZ",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Tanzania",
+    "pid": 1,
+    "id": 23424973
+  },
+  {
+    "code": "TH",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Thailand",
+    "pid": 1,
+    "id": 23424960
+  },
+  {
+    "code": "TL",
+    "lang": "POR",
+    "level": "country",
+    "name": "Timor-Leste",
+    "pid": 1,
+    "id": 23424968
+  },
+  {
+    "code": "TV",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Tuvalu",
+    "pid": 1,
+    "id": 23424970
+  },
+  {
+    "code": "TM",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Turkmenistan",
+    "pid": 1,
+    "id": 23424972
+  },
+  {
+    "code": "TF",
+    "lang": "ENG",
+    "level": "country",
+    "name": "French Southern Territories",
+    "pid": 1,
+    "id": 28289406
+  },
+  {
+    "code": "UA",
+    "lang": "UNK",
+    "level": "country",
+    "name": "Ukrayina",
+    "pid": 1,
+    "id": 23424976
+  },
+  {
+    "code": "US",
+    "lang": "ENG",
+    "level": "country",
+    "name": "United States",
+    "pid": 1,
+    "id": 23424977
+  },
+  {
+    "code": "UY",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Uruguay",
+    "pid": 1,
+    "id": 23424979
+  },
+  {
+    "code": "UM",
+    "lang": "ENG",
+    "level": "country",
+    "name": "United States Minor Outlying Islands",
+    "pid": 1,
+    "id": 28289407
+  },
+  {
+    "code": "UG",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Uganda",
+    "pid": 1,
+    "id": 23424974
+  },
+
+  {
+    "code": "UZ",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Uzbekistan",
+    "pid": 1,
+    "id": 23424980
+  },
+  {
+    "code": "VG",
+    "lang": "ENG",
+    "level": "country",
+    "name": "British Virgin Islands",
+    "pid": 1,
+    "id": 23424983
+  },
+  {
+    "code": "VI",
+    "lang": "ENG",
+    "level": "country",
+    "name": "US Virgin Islands",
+    "pid": 1,
+    "id": 23424985
+  },
+  {
+    "code": "VU",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Vanuatu",
+    "pid": 1,
+    "id": 23424907
+  },
+  {
+    "code": "VE",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Venezuela",
+    "pid": 1,
+    "id": 23424982
+  },
+  {
+    "code": "VA",
+    "lang": "ITA",
+    "level": "country",
+    "name": "Città del Vaticano",
+    "pid": 1,
+    "id": 23424986
+  },
+  {
+    "code": "VC",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Saint Vincent and the Grenadines",
+    "pid": 1,
+    "id": 23424981
+  },
+  {
+    "code": "VN",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Vietnam",
+    "pid": 1,
+    "id": 23424984
+  },
+  {
+    "code": "WS",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Samoa",
+    "pid": 1,
+    "id": 23424992
+  },
+  {
+    "code": "WF",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Wallis and Futuna",
+    "pid": 1,
+    "id": 23424989
+  },
+  {
+    "code": "XD",
+    "lang": "ENG",
+    "level": "country",
+    "name": "United Nations Neutral Zone",
+    "pid": 1,
+    "id": 23424997
+  },
+  {
+    "code": "XX",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Disputed Territory",
+    "pid": 1,
+    "id": 23424928
+  },
+  {
+    "code": "XS",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Spratly Islands",
+    "pid": 1,
+    "id": 23424921
+  },
+  {
+    "code": "XE",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Iraq-Saudi Arabia Neutral Zone",
+    "pid": 1,
+    "id": 23424998
+  },
+  {
+    "code": "YT",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Mayotte",
+    "pid": 1,
+    "id": 23424886
+  },
+  {
+    "code": "YE",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Yemen",
+    "pid": 1,
+    "id": 23425002
+  },
+  {
+    "code": "ZA",
+    "lang": "ENG",
+    "level": "country",
+    "name": "South Africa",
+    "pid": 1,
+    "id": 23424942
+  },
+  {
+    "code": "ZM",
+    "lang": "ENG",
+    "level": "country",
+    "name": "Zambia",
+    "pid": 1,
+    "id": 23425003
+  }
+]
