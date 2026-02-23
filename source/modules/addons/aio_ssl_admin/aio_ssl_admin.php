@@ -55,7 +55,7 @@ function aio_ssl_admin_config()
 function aio_ssl_admin_activate()
 {
     try {
-        $pdo = \WHMCS\Database\Capsule\Manager::connection()->getPdo();
+        $pdo = \WHMCS\Database\Capsule::connection()->getPdo();
 
         // Table: mod_aio_ssl_providers
         $pdo->exec("CREATE TABLE IF NOT EXISTS `mod_aio_ssl_providers` (
