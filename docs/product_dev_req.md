@@ -1,10 +1,10 @@
 # HVN - AIO SSL Manager
 ## Product Development Requirements (PDR)
 
-> **Version:** 1.0.0  
+> **Version:** 1.1.0  
 > **Author:** HVN GROUP (https://hvn.vn)  
 > **License:** Proprietary  
-> **Created:** 2026-02-11  
+> **Created:** 2026-02-11 | **Revised:** 2026-02-23  
 > **Module Type:** WHMCS Admin Addon + Server Provisioning Module
 
 ---
@@ -24,8 +24,9 @@
 11. [Backward Compatibility & Migration](#11-backward-compatibility--migration)
 12. [Security Architecture](#12-security-architecture)
 13. [UI/UX Design Specifications](#13-uiux-design-specifications)
-14. [Implementation Plan](#14-implementation-plan)
-15. [Risk Assessment](#15-risk-assessment)
+14. [WHMCS Template Engine Rules](#14-whmcs-template-engine-rules)
+15. [Implementation Plan](#15-implementation-plan)
+16. [Risk Assessment](#16-risk-assessment)
 
 ---
 
@@ -35,12 +36,14 @@
 
 HVN currently manages SSL certificates through **four separate WHMCS modules**, each with its own interface, database patterns, and management workflows:
 
-| Module | Provider | Module Name | Storage |
-|--------|----------|-------------|---------|
-| NicSRS SSL | NicSRS | `nicsrs_ssl` | `nicsrs_sslorders` + `tblsslorders` |
-| GoGetSSL (SSLCENTER) | GoGetSSL | `SSLCENTERWHMCS` | `tblsslorders` |
-| TheSSLStore | TheSSLStore | `thesslstore_ssl` (or custom) | `tblsslorders` |
-| SSL2Buy | SSL2Buy | `ssl2buy` | `tblsslorders` |
+| Module | Provider | Server Module Name | Order Storage Table | Module value in orders |
+|--------|----------|-------------------|---------------------|----------------------|
+| NicSRS SSL | NicSRS | `nicsrs_ssl` | `nicsrs_sslorders` (custom) | `nicsrs_ssl` |
+| GoGetSSL (SSLCENTER) | GoGetSSL | `SSLCENTERWHMCS` | `tblsslorders` (native) | `SSLCENTERWHMCS` |
+| TheSSLStore | TheSSLStore | `thesslstore_ssl` | `tblsslorders` (native) | `thesslstore_ssl` / `thesslstore` |
+| SSL2Buy | SSL2Buy | `ssl2buy` | `tblsslorders` (native) | `ssl2buy` |
+
+**Critical observation**: NicSRS uses a **custom `nicsrs_sslorders` table**, while the other three use WHMCS's native `tblsslorders`. The AIO module must handle both tables for backward compatibility.
 
 This fragmentation creates operational overhead: no unified dashboard, no cross-provider price comparison, inconsistent client experiences, and duplicated maintenance effort.
 
@@ -51,15 +54,19 @@ Build a **single, unified AIO (All-In-One) SSL Manager** module for WHMCS that:
 - Provides cross-provider price comparison with intelligent product name mapping
 - Uses a plugin-based architecture for easy addition of future providers
 - Maintains full backward compatibility with existing orders from all four legacy modules
-- Leverages WHMCS's native `tblsslorders` table for unified order visibility
+- Reads from BOTH `tblsslorders` AND `nicsrs_sslorders` for unified order visibility
 
-### 1.3 Key Decision: Native `tblsslorders` Integration
+### 1.3 Key Architecture Decision: Dual-Table Read, Single-Table Write
 
-**Critical architectural decision**: The AIO module writes to WHMCS's native `tblsslorders` table (not a custom table) so that:
-- Existing orders from legacy modules remain visible and manageable
-- WHMCS admin SSL order views work natively
-- Third-party integrations expecting `tblsslorders` continue to function
-- The module field (`tblsslorders.module`) distinguishes which provider handles each order
+For **new AIO orders**, the module writes to its own custom table `mod_aio_ssl_orders` to avoid conflicts with legacy modules still running. For **backward compatibility**, the module reads from:
+
+| Table | Read | Write | Purpose |
+|-------|------|-------|---------|
+| `mod_aio_ssl_orders` | ✅ | ✅ | New AIO orders |
+| `nicsrs_sslorders` | ✅ | ❌ | Legacy NicSRS orders (read-only) |
+| `tblsslorders` | ✅ | ❌ | Legacy GoGetSSL/TheSSLStore/SSL2Buy orders (read-only) |
+
+When admin "claims" a legacy order, a **new record** is created in `mod_aio_ssl_orders` with migration metadata linking to the original record. The original record in the legacy table is **not modified**.
 
 ---
 
@@ -90,11 +97,11 @@ Build a **single, unified AIO (All-In-One) SSL Manager** module for WHMCS that:
 
 ### 2.3 Success Criteria
 
-1. All existing orders from 4 legacy modules manageable through AIO interface
+1. All existing orders from 4 legacy modules viewable through AIO interface
 2. New orders can be placed with any enabled provider
 3. Admin can compare prices for the same certificate type across providers
 4. Adding a new provider requires only creating a new provider plugin class (no core changes)
-5. Zero downtime migration from legacy modules
+5. Zero downtime — legacy modules can run alongside AIO during transition
 
 ---
 
@@ -109,6 +116,7 @@ Build a **single, unified AIO (All-In-One) SSL Manager** module for WHMCS that:
 │  ┌────────────────────────────┐  ┌────────────────────────────┐ │
 │  │  Admin Addon Module        │  │  Server Provisioning Module │ │
 │  │  aio_ssl_admin             │  │  aio_ssl                   │ │
+│  │  Templates: PHP (.php)     │  │  Templates: Smarty (.tpl)  │ │
 │  │                            │  │                            │ │
 │  │  • Dashboard               │  │  • CreateAccount           │ │
 │  │  • Provider Management     │  │  • ClientArea              │ │
@@ -123,8 +131,9 @@ Build a **single, unified AIO (All-In-One) SSL Manager** module for WHMCS that:
 │             └────────────┬───────────────────┘                   │
 │                          │                                       │
 │              ┌───────────▼────────────┐                          │
-│              │  Provider Plugin Layer  │                          │
-│              │  (ProviderInterface)    │                          │
+│              │  Shared Library Layer   │                          │
+│              │  (Provider plugins,     │                          │
+│              │   Services, Helpers)    │                          │
 │              ├────────────────────────┤                          │
 │              │ NicSRS    │ GoGetSSL   │                          │
 │              │ TheSSLSt  │ SSL2Buy    │                          │
@@ -133,8 +142,10 @@ Build a **single, unified AIO (All-In-One) SSL Manager** module for WHMCS that:
 │                          │                                       │
 │              ┌───────────▼────────────┐                          │
 │              │  Database Layer         │                          │
-│              │  tblsslorders (native)  │                          │
-│              │  mod_aio_ssl_*          │                          │
+│              │  mod_aio_ssl_orders     │ ← New orders            │
+│              │  nicsrs_sslorders       │ ← Legacy read-only      │
+│              │  tblsslorders           │ ← Legacy read-only      │
+│              │  mod_aio_ssl_*          │ ← Config/catalog        │
 │              └────────────────────────┘                          │
 └──────────────────────────────────────────────────────────────────┘
 ```
@@ -179,7 +190,7 @@ interface ProviderInterface
     public function validateOrder(array $params): array;
 
     // ── Capability Declaration ──
-    public function getCapabilities(): array;  // ['cancel', 'revoke', 'reissue', 'renew', ...]
+    public function getCapabilities(): array;  // ['cancel', 'revoke', 'reissue', ...]
 }
 ```
 
@@ -196,50 +207,91 @@ Based on API capability analysis, providers fall into two tiers:
 - Configuration Link (SSL2Buy's `GetSSLConfigurationLink` API) for manual certificate management
 - PIN-based management system through SSL2Buy's portal
 - Admin UI shows "Manage at Provider" button with direct link
-- Status sync via vendor-specific `GetOrderDetails` endpoints (branched by CA: Comodo, GlobalSign, Symantec)
+- Status sync via vendor-specific `GetOrderDetails` endpoints (branched by CA: Comodo, GlobalSign, Symantec/DigiCert)
 
 ---
 
 ## 4. Provider API Capability Matrix
 
-### 4.1 Full Comparison
+### 4.1 Authentication Methods (CRITICAL DETAIL)
+
+| Provider | Auth Method | Details |
+|----------|-----------|---------|
+| **NicSRS** | Static API Token | Token sent as `api_token` POST form parameter. Token obtained from portal.nicsrs.com. No session/expiry. |
+| **GoGetSSL** | Session-based Token | **Step 1**: POST `/auth/` with `user` + `pass` → returns `{"key":"xxx"}`. **Step 2**: Pass `auth_key=xxx` in all subsequent requests. Token expires after inactivity. Must cache & refresh. |
+| **TheSSLStore** | Partner Code + Auth Token | Both sent in JSON body as `AuthRequest` object: `{"PartnerCode":"xxx","AuthToken":"xxx"}`. Every request includes this. |
+| **SSL2Buy** | Partner Email + API Key | Both sent in JSON body: `{"PartnerEmail":"xxx","ApiKey":"xxx"}`. Every request includes this. |
+
+### 4.2 Full Capability Comparison
 
 | Capability | NicSRS | GoGetSSL | TheSSLStore | SSL2Buy |
 |------------|--------|----------|-------------|---------|
-| **Auth Method** | API Token (POST param) | User/Pass → Auth Token | PartnerCode + AuthToken (JSON body) | PartnerEmail + ApiKey (JSON body) |
-| **API Protocol** | REST POST, form-urlencoded | REST GET/POST | REST POST, JSON | REST POST, JSON |
+| **API Protocol** | REST POST, form-urlencoded | REST GET/POST, form-urlencoded | REST POST, **JSON** | REST POST, **JSON** |
 | **API Base URL** | `portal.nicsrs.com/ssl` | `my.gogetssl.com/api` | `api.thesslstore.com/rest` | `api.ssl2buy.com` |
-| **Get Products** | ✅ `/productList` | ✅ `/products/` | ✅ `/product/query` | ✅ `GetProductPrice` |
-| **Get Pricing** | ✅ in productList | ✅ `/products/price/{id}` | ✅ in product/query | ✅ `GetProductPrice` |
+| **Sandbox URL** | ❌ None | ✅ `sandbox.gogetssl.com/api` | ✅ `sandbox-wbapi.thesslstore.com/rest` | ✅ (test mode flag) |
+| **Product ID Type** | String code (`positivessl`) | **Numeric ID** (`71`) | String code (`positivessl`) | **Numeric code** (`351`) |
+| **Get Products** | ✅ `/productList` | ✅ `/products/` or `/products/ssl/` | ✅ `/product/query` | ✅ `GetProductPrice` (per product) |
+| **Get All Prices** | ✅ in productList response | ✅ `/products/all_prices/` | ✅ in product/query | ❌ No bulk pricing |
 | **Validate Order** | ✅ `/validate` | ✅ (via order params) | ✅ `/order/validate` | ✅ `ValidateOrder` |
 | **Place Order** | ✅ `/place` | ✅ `/orders/add_ssl_order` | ✅ `/order/neworder` | ✅ `PlaceOrder` |
-| **Order Status** | ✅ `/collect` | ✅ `/orders/status/{id}` | ✅ `/order/status` | ✅ `GetOrderDetails` (per CA) |
-| **Download Cert** | ✅ `/collect` (cert in response) | ✅ `/orders/ssl/download/{id}` | ✅ `/order/download` | ❌ (via config link) |
+| **Order Status** | ✅ `/collect` | ✅ `/orders/status/{id}` | ✅ `/order/status` | ✅ `GetOrderDetails` (per CA brand) |
+| **Download Cert** | ✅ `/collect` (cert in response) | ✅ `/orders/ssl/download/{id}` | ✅ `/order/download` + `/order/downloadaszip` | ❌ (via config link) |
 | **Reissue** | ✅ `/reissue` | ✅ `/orders/ssl/reissue/{id}` | ✅ `/order/reissue` | ❌ |
-| **Renew** | ✅ `/renew` | ✅ `/orders/add_ssl_renew_order` | ✅ (new order with `isRenewalOrder`) | ❌ |
+| **Renew** | ✅ `/renew` | ✅ `/orders/add_ssl_renew_order` | ⚠️ `/order/neworder` with `isRenewalOrder=true` | ❌ |
 | **Revoke** | ✅ `/revoke` | ✅ `/orders/ssl/revoke/{id}` | ✅ `/order/certificaterevokerequest` | ❌ |
-| **Cancel** | ✅ `/cancel` | ✅ `/orders/cancel_ssl_order/{id}` | ✅ `/order/refundrequest` | ❌ |
+| **Cancel/Refund** | ✅ `/cancel` | ✅ `/orders/cancel_ssl_order/{id}` | ✅ `/order/refundrequest` | ❌ |
 | **DCV Emails** | ✅ `/DCVemail` | ✅ `/tools/domain/emails/` | ✅ `/order/approverlist` | ❌ |
-| **Resend DCV** | ✅ `/DCVemail` (with certId) | ✅ `/orders/ssl/resend_validation_email/{id}` | ✅ `/order/resend` | ✅ `ResendApprovalMail` (per CA) |
+| **Resend DCV** | ✅ `/DCVemail` (with certId) | ✅ `/orders/ssl/resend_validation_email/{id}` | ✅ `/order/resend` | ⚠️ `ResendApprovalMail` (per CA brand) |
 | **Change DCV** | ✅ `/updateDCV` | ✅ `/orders/ssl/change_dcv_method/{id}` | ✅ `/order/changeapproveremail` | ❌ |
-| **Get Balance** | ❌ | ✅ `/account/balance/` | ❌ (via health service) | ✅ `GetBalance` |
+| **Get Balance** | ❌ | ✅ `/account/balance/` | ❌ | ✅ `GetBalance` |
 | **CSR Decode** | ✅ `/csrDecode` | ✅ `/tools/csr/decode/` | ❌ (client-side) | ❌ |
 | **CAA Check** | ✅ `/caaCheck` | ❌ | ❌ | ❌ |
 | **Config Link** | ❌ | ❌ | ❌ | ✅ `GetSSLConfigurationLink` |
-| **Sandbox** | ❌ | ✅ (sandbox API) | ✅ (sandbox URL) | ✅ (test mode) |
+| **Invite Order** | ❌ | ❌ | ✅ `/order/inviteorder` | ❌ |
+| **Mid-Term Upgrade** | ❌ | ❌ | ✅ `/order/midtermupgrade` | ❌ |
 | **Tier** | **Full** | **Full** | **Full** | **Limited** |
 
-### 4.2 SSL2Buy Vendor-Specific Routing
+> **Note on TheSSLStore Renew**: TheSSLStore does NOT have a dedicated renew endpoint. Renewal is done by placing a new order via `/order/neworder` with `isRenewalOrder: true` and `RelatedTheSSLStoreOrderID` set to the previous order ID.
 
-SSL2Buy routes API calls by Certificate Authority brand. The `brand_name` field determines the endpoint:
+### 4.3 SSL2Buy Vendor-Specific Routing
 
-| CA Brand | Order Details Endpoint | Resend Approval Endpoint |
-|----------|----------------------|-------------------------|
-| Comodo/Sectigo | `/queryservice/comodo/getorderdetails` | `/queryservice/comodo/resendapprovalemail` |
-| GlobalSign | `/queryservice/globalsign/getorderdetails` | `/queryservice/globalsign/resendapprovalemail` |
-| Symantec/DigiCert | `/queryservice/symantec/getorderdetails` | `/queryservice/symantec/resendapprovalemail` |
-| PrimeSSL | `/queryservice/prime/primesubscriptionorderdetail` | N/A |
-| ACME | `/queryservice/acme/GetAcmeOrderDetail` | N/A |
+SSL2Buy routes query API calls by Certificate Authority brand. The `brand_name` from `SSL2BuyProducts` determines the endpoint:
+
+| CA Brand (in module) | brand_name | Query Route | Resend Approval Route |
+|---------------------|------------|-------------|----------------------|
+| Sectigo/Comodo | `Comodo` | `/queryservice/comodo/getorderdetails` | `/queryservice/comodo/resendapprovalemail` |
+| GlobalSign/AlphaSSL | `GlobalSign` | `/queryservice/globalsign/getorderdetails` | `/queryservice/globalsign/resendapprovalemail` |
+| DigiCert/Symantec/GeoTrust/Thawte/RapidSSL | `Symantec` | `/queryservice/symantec/getorderdetails` | `/queryservice/symantec/resendapprovalemail` |
+| PrimeSSL | `Prime` | `/queryservice/prime/primesubscriptionorderdetail` | N/A |
+| ACME (Sectigo) | `sectigo_acme` | `/queryservice/acme/GetAcmeOrderDetail` | N/A |
+
+### 4.4 SSL2Buy ConfigOptions in Legacy Module
+
+The legacy `ssl2buy` server module uses these WHMCS product config fields:
+
+| Field | Usage |
+|-------|-------|
+| `configoption1` | Partner Email |
+| `configoption2` | API Key |
+| `configoption3` | Product Code (numeric, from `SSL2BuyProducts`) |
+| `configoption4` | (unused) |
+| `configoption5` | (unused) |
+| `configoption6` | (unused) |
+| `configoption7` | Test Mode (`on`/`off`) |
+
+### 4.5 GoGetSSL ConfigOptions in Legacy Module
+
+| Field | Usage |
+|-------|-------|
+| `configoption1` | API Product ID (numeric) |
+| `configoption2` | Months (validity period) |
+| `configoption3` | Enable SANs (`on`/off) |
+| `configoption4` | Included SANs count |
+| `configoption5` | Price Auto Download |
+| `configoption6` | Commission % |
+| `configoption7` | Month One-Time |
+| `configoption8` | Included SANs Wildcard count |
+| `configoption13` | Enable SAN Wildcard |
 
 ---
 
@@ -251,56 +303,56 @@ Each provider uses different product names/codes for the **same certificate**. F
 
 **Example: "Sectigo PositiveSSL" (DV, Single Domain)**
 
-| Provider | Product Code | Product Name |
-|----------|-------------|--------------|
-| **WHMCS Product** | (configoption1) | Sectigo PositiveSSL |
-| **NicSRS** | `positivessl` | PositiveSSL |
-| **GoGetSSL** | `71` (product ID) | Sectigo PositiveSSL DV |
-| **TheSSLStore** | `positivessl` | Sectigo Positive SSL |
-| **SSL2Buy** | `351` (product code) | Sectigo Positive SSL |
+| Provider | Product Code / ID | Product Name in Provider |
+|----------|------------------|--------------------------|
+| **WHMCS Product** | (configoption varies) | Sectigo PositiveSSL |
+| **NicSRS** | `positivessl` (string) | PositiveSSL |
+| **GoGetSSL** | `71` (numeric ID) | Sectigo PositiveSSL DV |
+| **TheSSLStore** | `positivessl` (string) | Sectigo Positive SSL |
+| **SSL2Buy** | `351` (numeric code) | Sectigo Positive SSL |
 
 ### 5.2 Canonical Product Mapping Table
 
 A new database table `mod_aio_ssl_product_map` stores mappings between a canonical product identifier and each provider's product code. Key mappings:
 
-| Canonical ID | Canonical Name | Type | NicSRS Code | GoGetSSL ID | TheSSLStore Code | SSL2Buy Code |
-|-------------|---------------|------|-------------|-------------|-----------------|-------------|
-| `sectigo-positivessl` | Sectigo PositiveSSL | DV | `positivessl` | `71` | `positivessl` | `351` |
-| `sectigo-positivessl-wildcard` | Sectigo PositiveSSL Wildcard | DV | `positivessl_wildcard` | `72` | `positivesslwildcard` | `352` |
-| `sectigo-positivessl-multi` | Sectigo PositiveSSL Multi-Domain | DV | `positivessl_multidomain` | `74` | `positivesslmultidomain` | `371` |
-| `sectigo-essentialssl` | Sectigo EssentialSSL | DV | N/A | `65` | `essentialssl` | `362` |
-| `sectigo-essentialssl-wildcard` | Sectigo EssentialSSL Wildcard | DV | N/A | `66` | `essentialsslwildcard` | `363` |
-| `sectigo-instantssl` | Sectigo InstantSSL | OV | N/A | `22` | `instantssl` | `354` |
-| `sectigo-instantssl-pro` | Sectigo InstantSSL Pro | OV | N/A | `23` | `instantsslpro` | `355` |
-| `sectigo-ov-ssl` | Sectigo OV SSL | OV | `sectigo_ov` | `198` | `sectigosslovi` | `384` |
-| `sectigo-ov-wildcard` | Sectigo OV Wildcard | OV | `sectigo_ov_wildcard` | `199` | `sectigosslwildcardov` | `385` |
-| `sectigo-ev-ssl` | Sectigo EV SSL | EV | `sectigo_ev_ssl` | `21` | `sectigoevssl` | `360` |
-| `sectigo-ev-multi` | Sectigo EV Multi-Domain | EV | `sectigo_ev_multidomain` | `68` | `sectigoevmultidomain` | `370` |
-| `sectigo-premium-ssl` | Sectigo Premium SSL | OV | N/A | N/A | `premiumssl` | `357` |
-| `sectigo-premium-wildcard` | Sectigo Premium Wildcard | OV | N/A | N/A | `premiumsslwildcard` | `358` |
-| `geotrust-quickssl-premium` | GeoTrust QuickSSL Premium | DV | `geotrust_quickssl_premium` | `42` | `quicksslpremium` | `5` |
-| `geotrust-truebiz-id` | GeoTrust True BusinessID | OV | `geotrust_truebusiness_id` | `45` | `truebusinessid` | `6` |
-| `geotrust-truebiz-wildcard` | GeoTrust True BusinessID Wildcard | OV | N/A | `46` | `truebusinessidwildcard` | `7` |
-| `geotrust-truebiz-ev` | GeoTrust True BusinessID EV | EV | N/A | `47` | `truebusinessidev` | `8` |
-| `rapidssl-standard` | RapidSSL Certificate | DV | N/A | `14` | `rapidssl` | `1` |
-| `rapidssl-wildcard` | RapidSSL Wildcard | DV | N/A | `15` | `rapidsslwildcard` | `2` |
-| `thawte-ssl-webserver` | Thawte SSL Web Server | OV | N/A | `32` | `sslwebserver` | `11` |
-| `thawte-ssl123` | Thawte SSL123 | DV | N/A | `30` | `ssl123` | `12` |
-| `thawte-ev-ssl` | Thawte EV SSL | EV | N/A | `33` | `sslwebserverwithev` | `19` |
-| `digicert-secure-site` | DigiCert Secure Site | OV | N/A | N/A | `securesite` | `13` |
-| `digicert-secure-site-pro` | DigiCert Secure Site Pro | OV | N/A | N/A | `securesitepro` | `14` |
-| `digicert-secure-site-ev` | DigiCert Secure Site EV | EV | N/A | N/A | `securesiteev` | `16` |
-| `digicert-basic-ov` | DigiCert Basic OV | OV | N/A | N/A | `digicertov` | `528` |
-| `digicert-basic-ev` | DigiCert Basic EV | EV | N/A | N/A | `digicertev` | `529` |
-| `globalsign-domain-ssl` | GlobalSign DomainSSL | DV | N/A | `87` | N/A | `103` |
-| `globalsign-org-ssl` | GlobalSign OrganizationSSL | OV | N/A | `88` | N/A | `105` |
-| `globalsign-ev-ssl` | GlobalSign ExtendedSSL | EV | N/A | `89` | N/A | `109` |
-| `alphassl-standard` | AlphaSSL Certificate | DV | N/A | `85` | N/A | `101` |
-| `alphassl-wildcard` | AlphaSSL Wildcard | DV | N/A | `86` | N/A | `102` |
-| `sectigo-code-signing` | Sectigo Code Signing | OV/CS | `sectigo_code_signing` | `61` | `codesigning` | `364` |
-| `sectigo-ev-code-signing` | Sectigo EV Code Signing | EV/CS | `sectigo_ev_code_signing` | `62` | `evcodesigning` | `386` |
+| Canonical ID | Canonical Name | Type | Val. | NicSRS Code | GoGetSSL ID | TheSSLStore Code | SSL2Buy Code |
+|-------------|---------------|------|------|-------------|-------------|-----------------|-------------|
+| `sectigo-positivessl` | Sectigo PositiveSSL | SSL | DV | `positivessl` | `71` | `positivessl` | `351` |
+| `sectigo-positivessl-wildcard` | Sectigo PositiveSSL Wildcard | WC | DV | `positivessl_wildcard` | `72` | `positivesslwildcard` | `352` |
+| `sectigo-positivessl-multi` | Sectigo PositiveSSL Multi-Domain | MD | DV | `positivessl_multidomain` | `74` | `positivesslmultidomain` | `371` |
+| `sectigo-essentialssl` | Sectigo EssentialSSL | SSL | DV | — | `65` | `essentialssl` | `362` |
+| `sectigo-essentialssl-wildcard` | Sectigo EssentialSSL Wildcard | WC | DV | — | `66` | `essentialsslwildcard` | `363` |
+| `sectigo-instantssl` | Sectigo InstantSSL | SSL | OV | — | `22` | `instantssl` | `354` |
+| `sectigo-instantssl-pro` | Sectigo InstantSSL Pro | SSL | OV | — | `23` | `instantsslpro` | `355` |
+| `sectigo-ov-ssl` | Sectigo OV SSL | SSL | OV | `sectigo_ov` | `198` | `sectigosslovi` | `384` |
+| `sectigo-ov-wildcard` | Sectigo OV Wildcard | WC | OV | `sectigo_ov_wildcard` | `199` | `sectigosslwildcardov` | `385` |
+| `sectigo-ev-ssl` | Sectigo EV SSL | SSL | EV | `sectigo_ev_ssl` | `21` | `sectigoevssl` | `360` |
+| `sectigo-ev-multi` | Sectigo EV Multi-Domain | MD | EV | `sectigo_ev_multidomain` | `68` | `sectigoevmultidomain` | `370` |
+| `sectigo-premium-ssl` | Sectigo Premium SSL | SSL | OV | — | — | `premiumssl` | `357` |
+| `sectigo-premium-wildcard` | Sectigo Premium Wildcard | WC | OV | — | — | `premiumsslwildcard` | `358` |
+| `geotrust-quickssl-premium` | GeoTrust QuickSSL Premium | SSL | DV | `geotrust_quickssl_premium` | `42` | `quicksslpremium` | `5` |
+| `geotrust-truebiz-id` | GeoTrust True BusinessID | SSL | OV | `geotrust_truebusiness_id` | `45` | `truebusinessid` | `6` |
+| `geotrust-truebiz-wildcard` | GeoTrust True BusinessID Wildcard | WC | OV | — | `46` | `truebusinessidwildcard` | `7` |
+| `geotrust-truebiz-ev` | GeoTrust True BusinessID EV | SSL | EV | — | `47` | `truebusinessidev` | `8` |
+| `rapidssl-standard` | RapidSSL Certificate | SSL | DV | — | `14` | `rapidssl` | `1` |
+| `rapidssl-wildcard` | RapidSSL Wildcard | WC | DV | — | `15` | `rapidsslwildcard` | `2` |
+| `thawte-ssl-webserver` | Thawte SSL Web Server | SSL | OV | — | `32` | `sslwebserver` | `11` |
+| `thawte-ssl123` | Thawte SSL123 | SSL | DV | — | `30` | `ssl123` | `12` |
+| `thawte-ev-ssl` | Thawte EV SSL | SSL | EV | — | `33` | `sslwebserverwithev` | `19` |
+| `digicert-secure-site` | DigiCert Secure Site | SSL | OV | — | — | `securesite` | `13` |
+| `digicert-secure-site-pro` | DigiCert Secure Site Pro | SSL | OV | — | — | `securesitepro` | `14` |
+| `digicert-secure-site-ev` | DigiCert Secure Site EV | SSL | EV | — | — | `securesiteev` | `16` |
+| `digicert-basic-ov` | DigiCert Basic OV | SSL | OV | — | — | `digicertov` | `528` |
+| `digicert-basic-ev` | DigiCert Basic EV | SSL | EV | — | — | `digicertev` | `529` |
+| `globalsign-domain-ssl` | GlobalSign DomainSSL | SSL | DV | — | `87` | — | `103` |
+| `globalsign-org-ssl` | GlobalSign OrganizationSSL | SSL | OV | — | `88` | — | `105` |
+| `globalsign-ev-ssl` | GlobalSign ExtendedSSL | SSL | EV | — | `89` | — | `109` |
+| `alphassl-standard` | AlphaSSL Certificate | SSL | DV | — | `85` | — | `101` |
+| `alphassl-wildcard` | AlphaSSL Wildcard | WC | DV | — | `86` | — | `102` |
+| `sectigo-code-signing` | Sectigo Code Signing | CS | OV | `sectigo_code_signing` | `61` | `codesigning` | `364` |
+| `sectigo-ev-code-signing` | Sectigo EV Code Signing | CS | EV | `sectigo_ev_code_signing` | `62` | `evcodesigning` | `386` |
 
-> **Note**: N/A means the provider does not offer that product. The mapping table supports NULL values for providers that don't carry a specific product.
+> **Legend**: SSL = single domain, WC = wildcard, MD = multi-domain, CS = code signing. `—` means provider does not offer this product.
 
 ### 5.3 Auto-Mapping Strategy
 
@@ -326,15 +378,7 @@ For each enabled provider:
   └─ SSL2Buy:    code="351"               → fetch price from mod_aio_ssl_products
            │
            ▼
-Display comparison table:
-┌─────────────┬─────────┬──────────┬──────────────┬─────────┐
-│ Provider    │ 1 Year  │ 2 Years  │ 3 Years      │ Best?   │
-├─────────────┼─────────┼──────────┼──────────────┼─────────┤
-│ NicSRS      │ $7.95   │ $15.90   │ $23.85       │ ✅ Best │
-│ GoGetSSL    │ $8.50   │ $16.00   │ $24.00       │         │
-│ TheSSLStore │ $9.50   │ $18.00   │ $27.00       │         │
-│ SSL2Buy     │ $8.00   │ $15.50   │ $23.00       │         │
-└─────────────┴─────────┴──────────┴──────────────┴─────────┘
+Display comparison table with "Best Price" highlighting
 ```
 
 ### 5.5 WHMCS Product Linking
@@ -346,7 +390,7 @@ Each WHMCS product (`tblproducts`) links to the AIO module via:
 | `servertype` | `aio_ssl` |
 | `configoption1` | `canonical_id` (e.g., `sectigo-positivessl`) |
 | `configoption2` | Preferred provider slug (e.g., `nicsrs`) — or `auto` for cheapest |
-| `configoption3` | Provider-specific override (API token, etc.) |
+| `configoption3` | Provider-specific override token (optional) |
 | `configoption4` | Fallback provider slug (if primary fails) |
 
 When `configoption2` = `auto`, the module selects the cheapest enabled provider at order time.
@@ -357,22 +401,54 @@ When `configoption2` = `auto`, the module selects the cheapest enabled provider 
 
 ### 6.1 Tables Overview
 
-| Table | Purpose | Owner |
-|-------|---------|-------|
-| `tblsslorders` | **WHMCS native** — all SSL orders (read/write) | Shared |
-| `mod_aio_ssl_providers` | Provider configuration & credentials | Admin Addon |
-| `mod_aio_ssl_products` | Cached product catalog from all providers | Admin Addon |
-| `mod_aio_ssl_product_map` | Cross-provider product name mapping | Admin Addon |
-| `mod_aio_ssl_settings` | Module configuration (key-value) | Admin Addon |
-| `mod_aio_ssl_activity_log` | Audit trail | Admin Addon |
+| Table | Purpose | Owner | New? |
+|-------|---------|-------|------|
+| `mod_aio_ssl_orders` | New AIO orders | Server + Addon | ✅ New |
+| `mod_aio_ssl_providers` | Provider configuration & credentials | Admin Addon | ✅ New |
+| `mod_aio_ssl_products` | Cached product catalog from all providers | Admin Addon | ✅ New |
+| `mod_aio_ssl_product_map` | Cross-provider product name mapping | Admin Addon | ✅ New |
+| `mod_aio_ssl_settings` | Module configuration (key-value) | Admin Addon | ✅ New |
+| `mod_aio_ssl_activity_log` | Audit trail | Admin Addon | ✅ New |
+| `nicsrs_sslorders` | Legacy NicSRS orders | Read-only | Existing |
+| `tblsslorders` | Legacy GoGetSSL/TheSSLStore/SSL2Buy orders | Read-only | Existing |
 
-### 6.2 Schema: `mod_aio_ssl_providers`
+### 6.2 Schema: `mod_aio_ssl_orders`
+
+```sql
+CREATE TABLE `mod_aio_ssl_orders` (
+  `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
+  `userid` int(10) unsigned NOT NULL,
+  `serviceid` int(10) unsigned NOT NULL,
+  `provider_slug` varchar(50) NOT NULL,            -- 'nicsrs', 'gogetssl', etc.
+  `remoteid` varchar(255) DEFAULT '',              -- Provider's order/cert ID
+  `certtype` varchar(255) DEFAULT '',              -- Canonical product ID
+  `provider_product_code` varchar(150) DEFAULT '', -- Provider-specific product code
+  `status` varchar(50) NOT NULL DEFAULT 'Awaiting Configuration',
+  `configdata` longtext,                           -- JSON blob (see 6.7)
+  `provisiondate` date DEFAULT NULL,
+  `completiondate` datetime DEFAULT '0000-00-00 00:00:00',
+  `created_at` timestamp DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  -- Migration tracking
+  `legacy_table` varchar(50) DEFAULT NULL,         -- 'nicsrs_sslorders' or 'tblsslorders'
+  `legacy_order_id` int(10) DEFAULT NULL,          -- Original order ID in legacy table
+  `legacy_module` varchar(100) DEFAULT NULL,       -- Original module name
+  PRIMARY KEY (`id`),
+  KEY `idx_userid` (`userid`),
+  KEY `idx_serviceid` (`serviceid`),
+  KEY `idx_provider` (`provider_slug`),
+  KEY `idx_status` (`status`),
+  KEY `idx_remoteid` (`remoteid`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+### 6.3 Schema: `mod_aio_ssl_providers`
 
 ```sql
 CREATE TABLE `mod_aio_ssl_providers` (
   `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
   `slug` varchar(50) NOT NULL,                     -- 'nicsrs', 'gogetssl', 'thesslstore', 'ssl2buy'
-  `name` varchar(100) NOT NULL,                    -- 'NicSRS', 'GoGetSSL', etc.
+  `name` varchar(100) NOT NULL,
   `tier` enum('full','limited') NOT NULL DEFAULT 'full',
   `is_enabled` tinyint(1) NOT NULL DEFAULT 1,
   `sort_order` int NOT NULL DEFAULT 0,
@@ -396,7 +472,7 @@ CREATE TABLE `mod_aio_ssl_providers` (
 // NicSRS
 { "api_token": "xxx" }
 
-// GoGetSSL
+// GoGetSSL — NOTE: session token cached separately, not stored here
 { "username": "xxx", "password": "xxx" }
 
 // TheSSLStore
@@ -406,13 +482,13 @@ CREATE TABLE `mod_aio_ssl_providers` (
 { "partner_email": "xxx", "api_key": "xxx" }
 ```
 
-### 6.3 Schema: `mod_aio_ssl_products`
+### 6.4 Schema: `mod_aio_ssl_products`
 
 ```sql
 CREATE TABLE `mod_aio_ssl_products` (
   `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
-  `provider_slug` varchar(50) NOT NULL,            -- FK to mod_aio_ssl_providers.slug
-  `product_code` varchar(150) NOT NULL,            -- Provider-specific code
+  `provider_slug` varchar(50) NOT NULL,
+  `product_code` varchar(150) NOT NULL,            -- Provider-specific code (string or numeric)
   `product_name` varchar(255) NOT NULL,
   `vendor` varchar(50) NOT NULL,                   -- CA brand: Sectigo, DigiCert, etc.
   `validation_type` enum('dv','ov','ev') NOT NULL,
@@ -422,9 +498,9 @@ CREATE TABLE `mod_aio_ssl_products` (
   `max_domains` int NOT NULL DEFAULT 1,
   `max_years` int NOT NULL DEFAULT 1,
   `min_years` int NOT NULL DEFAULT 1,
-  `price_data` text,                               -- JSON pricing
+  `price_data` text,                               -- JSON pricing (normalized format)
   `extra_data` text,                               -- JSON: provider-specific metadata
-  `canonical_id` varchar(100) DEFAULT NULL,         -- FK to mod_aio_ssl_product_map
+  `canonical_id` varchar(100) DEFAULT NULL,
   `last_sync` datetime DEFAULT NULL,
   `created_at` timestamp DEFAULT CURRENT_TIMESTAMP,
   `updated_at` timestamp DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -436,41 +512,18 @@ CREATE TABLE `mod_aio_ssl_products` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
 
-**`price_data` JSON structure** (normalized across providers):
-
-```json
-{
-  "base": {
-    "12": 7.95,     // 12 months = $7.95
-    "24": 15.90,    // 24 months = $15.90
-    "36": 23.85     // 36 months = $23.85
-  },
-  "san": {
-    "12": 5.00,     // per SAN per 12 months
-    "24": 9.00,
-    "36": 13.00
-  },
-  "wildcard_san": {
-    "12": 45.00,
-    "24": 85.00
-  },
-  "currency": "USD",
-  "last_updated": "2026-02-11T10:00:00Z"
-}
-```
-
-### 6.4 Schema: `mod_aio_ssl_product_map`
+### 6.5 Schema: `mod_aio_ssl_product_map`
 
 ```sql
 CREATE TABLE `mod_aio_ssl_product_map` (
   `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
-  `canonical_id` varchar(100) NOT NULL,            -- 'sectigo-positivessl'
-  `canonical_name` varchar(255) NOT NULL,          -- 'Sectigo PositiveSSL'
-  `vendor` varchar(50) NOT NULL,                   -- 'Sectigo'
+  `canonical_id` varchar(100) NOT NULL,
+  `canonical_name` varchar(255) NOT NULL,
+  `vendor` varchar(50) NOT NULL,
   `validation_type` enum('dv','ov','ev') NOT NULL,
   `product_type` enum('ssl','wildcard','multi_domain','code_signing','email') NOT NULL DEFAULT 'ssl',
   `nicsrs_code` varchar(150) DEFAULT NULL,
-  `gogetssl_code` varchar(150) DEFAULT NULL,       -- GoGetSSL product ID
+  `gogetssl_code` varchar(150) DEFAULT NULL,
   `thesslstore_code` varchar(150) DEFAULT NULL,
   `ssl2buy_code` varchar(150) DEFAULT NULL,
   `is_active` tinyint(1) NOT NULL DEFAULT 1,
@@ -481,7 +534,7 @@ CREATE TABLE `mod_aio_ssl_product_map` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 ```
 
-### 6.5 Schema: `mod_aio_ssl_providers` — Config JSON Examples
+### 6.6 Provider Config JSON Examples
 
 ```json
 // NicSRS config
@@ -491,9 +544,11 @@ CREATE TABLE `mod_aio_ssl_product_map` (
   "api_timeout": 60
 }
 
-// GoGetSSL config
+// GoGetSSL config — includes session token cache
 {
-  "brand_mapping": { "geotrust": 18, "rapidssl": 18, "digicert": 18, "thawte": 18 },
+  "auth_token_cache": null,
+  "auth_token_expiry": null,
+  "brand_webserver_override": { "geotrust": 18, "rapidssl": 18, "digicert": 18, "thawte": 18 },
   "default_webserver_type": -1
 }
 
@@ -501,7 +556,9 @@ CREATE TABLE `mod_aio_ssl_product_map` (
 {
   "date_time_culture": "en-US",
   "signature_hash": "SHA2-256",
-  "cert_transparency": true
+  "cert_transparency": true,
+  "sandbox_partner_code": "",
+  "sandbox_auth_token": ""
 }
 
 // SSL2Buy config
@@ -517,24 +574,7 @@ CREATE TABLE `mod_aio_ssl_product_map` (
 }
 ```
 
-### 6.6 Using `tblsslorders` (WHMCS Native)
-
-The module writes to `tblsslorders` with these conventions:
-
-| Column | Usage |
-|--------|-------|
-| `id` | Auto-increment primary key |
-| `userid` | WHMCS client ID |
-| `serviceid` | WHMCS hosting/service ID |
-| `addon_id` | 0 (not addon-based) |
-| `remoteid` | Provider's order/certificate ID |
-| `module` | `aio_ssl` for new orders. Legacy orders retain original module names |
-| `certtype` | Canonical product ID (e.g., `sectigo-positivessl`) |
-| `completiondate` | Certificate issuance date |
-| `status` | Standard statuses: Awaiting Configuration, Draft, Pending, Processing, Complete, Cancelled, Revoked, Expired, Reissue |
-| `configdata` | JSON blob containing all order data (see below) |
-
-**`configdata` JSON for AIO orders**:
+### 6.7 `configdata` JSON for AIO Orders
 
 ```json
 {
@@ -548,9 +588,9 @@ The module writes to `tblsslorders` with these conventions:
   "domainInfo": [
     { "domainName": "example.com", "dcvMethod": "EMAIL", "dcvEmail": "admin@example.com", "dcvStatus": "validated" }
   ],
-  "admin_contact": { "firstname": "", "lastname": "", "email": "", "phone": "", ... },
-  "tech_contact": { ... },
-  "org_info": { ... },
+  "admin_contact": { "firstname": "", "lastname": "", "email": "", "phone": "" },
+  "tech_contact": {},
+  "org_info": {},
   "webserver_type": "Other",
   "beginDate": "2026-01-01",
   "endDate": "2027-01-01",
@@ -558,7 +598,9 @@ The module writes to `tblsslorders` with these conventions:
   "order_date": "2026-01-01 10:30:00",
   "migration": {
     "from_module": "nicsrs_ssl",
+    "from_table": "nicsrs_sslorders",
     "original_remoteid": "12345",
+    "original_order_id": 42,
     "migrated_at": "2026-02-01"
   }
 }
@@ -581,114 +623,85 @@ modules/
 │   │   └── vietnamese.php
 │   ├── lib/
 │   │   ├── Core/
-│   │   │   ├── ProviderInterface.php            # Provider contract
-│   │   │   ├── AbstractProvider.php             # Base implementation
-│   │   │   ├── ProviderFactory.php              # Factory: slug → provider instance
-│   │   │   ├── ProviderRegistry.php             # Registry of all available providers
-│   │   │   ├── EncryptionService.php            # AES-256-CBC for credentials
-│   │   │   └── NormalizedProduct.php            # Value object for product data
+│   │   │   ├── ProviderInterface.php
+│   │   │   ├── AbstractProvider.php
+│   │   │   ├── ProviderFactory.php
+│   │   │   ├── ProviderRegistry.php
+│   │   │   ├── EncryptionService.php
+│   │   │   └── NormalizedProduct.php
 │   │   ├── Provider/
 │   │   │   ├── NicsrsProvider.php
 │   │   │   ├── GoGetSSLProvider.php
 │   │   │   ├── TheSSLStoreProvider.php
 │   │   │   └── SSL2BuyProvider.php
 │   │   ├── Controller/
-│   │   │   ├── BaseController.php
+│   │   │   ├── BaseController.php               # includeTemplate() for PHP templates
 │   │   │   ├── DashboardController.php
-│   │   │   ├── ProviderController.php           # Provider CRUD
-│   │   │   ├── ProductController.php            # Catalog + mapping
-│   │   │   ├── PriceCompareController.php       # Price comparison
+│   │   │   ├── ProviderController.php
+│   │   │   ├── ProductController.php
+│   │   │   ├── PriceCompareController.php
 │   │   │   ├── OrderController.php
-│   │   │   ├── ImportController.php             # Migration + import
+│   │   │   ├── ImportController.php
 │   │   │   ├── ReportController.php
 │   │   │   └── SettingsController.php
 │   │   ├── Service/
-│   │   │   ├── SyncService.php                  # Auto-sync orchestrator
-│   │   │   ├── ProductMapService.php            # Canonical mapping logic
-│   │   │   ├── PriceCompareService.php          # Price comparison engine
+│   │   │   ├── SyncService.php
+│   │   │   ├── ProductMapService.php
+│   │   │   ├── PriceCompareService.php
 │   │   │   ├── NotificationService.php
-│   │   │   ├── MigrationService.php             # Legacy module migration
+│   │   │   ├── MigrationService.php
+│   │   │   ├── UnifiedOrderService.php          # Reads from all 3 tables
 │   │   │   └── ReportService.php
 │   │   └── Helper/
 │   │       ├── ViewHelper.php
 │   │       └── CurrencyHelper.php
-│   └── templates/
-│       ├── dashboard.tpl
-│       ├── providers.tpl
-│       ├── products.tpl
-│       ├── price_compare.tpl
-│       ├── orders.tpl
-│       ├── order_detail.tpl
-│       ├── import.tpl
-│       ├── reports.tpl
-│       └── settings.tpl
+│   ├── templates/                               # ⚠️ PHP templates (.php), NOT Smarty
+│   │   ├── dashboard.php
+│   │   ├── providers.php
+│   │   ├── provider_edit.php
+│   │   ├── products.php
+│   │   ├── product_mapping.php
+│   │   ├── price_compare.php
+│   │   ├── orders.php
+│   │   ├── order_detail.php
+│   │   ├── import.php
+│   │   ├── reports.php
+│   │   └── settings.php
+│   └── assets/
+│       ├── css/admin.css                        # Ant Design-inspired CSS variables
+│       └── js/admin.js
 │
 ├── servers/aio_ssl/                             # ──── SERVER MODULE ────
 │   ├── aio_ssl.php                              # Entry: ConfigOptions, CreateAccount, ClientArea
 │   ├── src/
 │   │   ├── Controller/
-│   │   │   ├── ActionController.php             # AJAX actions (apply, reissue, revoke, etc.)
-│   │   │   └── PageController.php               # Page rendering by status
+│   │   │   ├── ActionController.php
+│   │   │   └── PageController.php
 │   │   ├── Dispatcher/
-│   │   │   ├── ActionDispatcher.php             # Route + validate AJAX
-│   │   │   └── PageDispatcher.php               # Route + validate pages
+│   │   │   ├── ActionDispatcher.php
+│   │   │   └── PageDispatcher.php
 │   │   ├── Service/
-│   │   │   ├── OrderService.php                 # CRUD on tblsslorders
-│   │   │   ├── CertificateService.php           # CSR gen, cert ops
-│   │   │   └── ProviderBridge.php               # Loads correct provider plugin
+│   │   │   ├── OrderService.php                 # CRUD on mod_aio_ssl_orders
+│   │   │   ├── CertificateService.php
+│   │   │   └── ProviderBridge.php
 │   │   └── compatibility.php                    # Legacy class aliases
-│   ├── templates/
-│   │   ├── apply.tpl                            # Multi-step application
-│   │   ├── pending.tpl
-│   │   ├── complete.tpl
-│   │   ├── reissue.tpl
+│   ├── view/                                    # ⚠️ Smarty templates (.tpl) for CLIENT AREA
+│   │   ├── applycert.tpl                        # Multi-step application
+│   │   ├── pending.tpl                          # Pending/processing status
+│   │   ├── complete.tpl                         # Issued cert: download, reissue
+│   │   ├── reissue.tpl                          # Reissue form
 │   │   ├── migrated.tpl                         # Legacy vendor cert view
-│   │   └── limited_provider.tpl                 # For SSL2Buy (config link)
-│   └── lang/
-│       ├── english.php
-│       ├── vietnamese.php
-│       └── chinese.php
+│   │   ├── limited_provider.tpl                 # For SSL2Buy (config link)
+│   │   ├── error.tpl
+│   │   └── message.tpl
+│   ├── lang/
+│   │   ├── english.php
+│   │   ├── vietnamese.php
+│   │   └── chinese.php
+│   └── assets/
+│       ├── css/ssl-manager.css                  # Ant Design-inspired client CSS
+│       └── js/ssl-manager.js
 ```
-
-### 7.2 Provider Plugin Registration
-
-Providers are auto-discovered via `ProviderRegistry`:
-
-```php
-// lib/Core/ProviderRegistry.php
-class ProviderRegistry
-{
-    private static array $providers = [
-        'nicsrs'      => NicsrsProvider::class,
-        'gogetssl'    => GoGetSSLProvider::class,
-        'thesslstore' => TheSSLStoreProvider::class,
-        'ssl2buy'     => SSL2BuyProvider::class,
-    ];
-
-    public static function register(string $slug, string $class): void
-    {
-        self::$providers[$slug] = $class;
-    }
-
-    public static function get(string $slug): ProviderInterface
-    {
-        // Load credentials from mod_aio_ssl_providers
-        // Instantiate and return
-    }
-
-    public static function getAllEnabled(): array
-    {
-        // Return instances for all enabled providers
-    }
-}
-```
-
-**Adding a new provider** requires:
-1. Create `NewProvider.php` implementing `ProviderInterface`
-2. Register in `ProviderRegistry::$providers`
-3. Add a row to `mod_aio_ssl_providers`
-4. Add column to `mod_aio_ssl_product_map` (or use `extra_data` JSON)
-5. No core module changes needed
 
 ---
 
@@ -697,130 +710,67 @@ class ProviderRegistry
 ### 8.1 Admin Dashboard
 
 **Unified statistics across all providers:**
-- Total orders by provider (stacked bar chart)
-- Order status distribution (doughnut chart)  
+- Total orders by provider (stacked bar chart — Chart.js)
+- Order status distribution (doughnut chart)
 - Monthly order trends (line chart, per provider)
 - Revenue by provider (bar chart)
 - Expiring certificates (sortable table, all providers)
-- API health status for each provider (color-coded indicators)
-- Provider balance (for GoGetSSL and SSL2Buy)
+- API health status for each provider (color-coded: 🟢/🔴)
+- Provider balance (GoGetSSL and SSL2Buy only)
 
 ### 8.2 Provider Management (CRUD)
 
 | Action | Description |
 |--------|-------------|
-| **List** | Table showing all providers with status, tier, last sync, test result |
-| **Add** | Form: name, slug, tier, API credentials (encrypted), sandbox toggle |
+| **List** | Table: name, tier, enabled, last sync, test result, balance |
+| **Add** | Form: name, slug, tier, API credentials, sandbox toggle |
 | **Edit** | Modify credentials, enable/disable, change config |
-| **Test** | One-click API connection test for any provider |
+| **Test** | One-click API connection test (each provider's `testConnection()`) |
 | **Disable** | Soft-disable: existing orders remain, no new orders routed |
 | **Delete** | Hard-delete with confirmation (only if 0 active orders) |
 
-### 8.3 Product Catalog & Mapping
+### 8.3 Unified Order Management
 
-**Product Sync**: Fetches products from all enabled providers, normalizes, and stores in `mod_aio_ssl_products`.
-
-**Auto-Mapping**: After sync, the `ProductMapService` attempts to match products to canonical entries using:
-1. Exact code match
-2. Name normalization (lowercase, remove "Certificate", "SSL", trim)
-3. Fuzzy match (Levenshtein distance < 3)
-4. Remaining unmapped products flagged for admin review
-
-**Admin UI for Mapping**:
-- Table of canonical products with columns for each provider's matched product
-- Dropdown to manually assign/change provider product mapping
-- "Unmapped Products" alert showing products that couldn't be auto-mapped
-- Bulk-create canonical entries from provider products
-
-### 8.4 Price Comparison
-
-**Comparison View**: Admin selects a WHMCS product or canonical product:
-- Side-by-side pricing from all providers (1yr, 2yr, 3yr)
-- SAN pricing comparison
-- Wildcard SAN pricing comparison  
-- "Best price" highlighting per period
-- Historical price tracking (optional, v2.0)
-
-**Bulk Comparison**: Export all products with cross-provider pricing to CSV.
-
-### 8.5 Unified Order Management
-
-**Order List**: Filterable by provider, status, client, date range, domain.
-
-**Order Detail**: Shows full certificate data regardless of provider:
-- Certificate info (domain, status, dates, type)
-- Provider badge (color-coded)
-- DCV status per domain
-- Action buttons (adapts to provider capabilities)
-- Activity log for this order
-
-**Provider-aware actions**: Buttons dynamically show/hide based on `getCapabilities()`:
-- Full tier: Reissue, Renew, Revoke, Cancel, Refresh, Resend DCV
-- Limited tier: Refresh Status, Manage at Provider (link), Resend Approval
-
-### 8.6 Certificate Lifecycle (Server Module)
-
-**Multi-step application** (client area):
-1. Generate/paste CSR → auto-detect domains
-2. Select DCV method per domain
-3. Enter admin/tech contacts (OV/EV)
-4. Confirm & submit
-
-**The server module** delegates all API calls through `ProviderBridge`:
+**Order List** reads from **three sources** via `UnifiedOrderService`:
 
 ```php
-class ProviderBridge
+class UnifiedOrderService
 {
-    public static function getProvider(int $serviceId): ProviderInterface
+    public function getAllOrders(array $filters): array
     {
-        // 1. Check tblsslorders for existing order → get provider from configdata
-        // 2. If new order → get provider from tblproducts.configoption2
-        // 3. If 'auto' → use PriceCompareService to find cheapest
-        // 4. Return provider instance via ProviderFactory
+        $orders = [];
+
+        // 1. AIO orders (new)
+        $orders = array_merge($orders, $this->getAioOrders($filters));
+
+        // 2. NicSRS legacy orders
+        if (Capsule::schema()->hasTable('nicsrs_sslorders')) {
+            $orders = array_merge($orders, $this->getNicsrsLegacyOrders($filters));
+        }
+
+        // 3. GoGetSSL/TheSSLStore/SSL2Buy legacy orders
+        if (Capsule::schema()->hasTable('tblsslorders')) {
+            $orders = array_merge($orders, $this->getTblsslLegacyOrders($filters));
+        }
+
+        return $this->sortAndPaginate($orders, $filters);
     }
 }
 ```
 
-### 8.7 Import & Migration
+### 8.4 Provider-Aware Actions
 
-**Import Sources**:
-1. **From provider API**: Enter remote ID → fetch data → create tblsslorders record
-2. **From legacy modules**: Detect existing `tblsslorders` records with `module` = legacy module name
-3. **Bulk import**: CSV upload with remote IDs
+Buttons dynamically show/hide based on `getCapabilities()`:
+- Full tier: Reissue, Renew, Revoke, Cancel, Refresh, Resend DCV, Change DCV
+- Limited tier (SSL2Buy): Refresh Status, Manage at Provider (external link), Resend Approval Email
 
-**Migration Strategy** (non-destructive):
-- Legacy orders retain their original `module` value in `tblsslorders`
-- AIO module can *read* and *display* legacy orders
-- Admin can "claim" a legacy order → updates `module` to `aio_ssl` and adds provider info to configdata
-- Vendor migration detection: when `servertype` changes to `aio_ssl`, detect existing certs from other modules
+### 8.5 Import & Migration
 
-### 8.8 Auto-Sync Engine
-
-```
-┌─ WHMCS Cron (AfterCronJob / DailyCronJob) ─────────────┐
-│                                                          │
-│  SyncService::runScheduledSync()                         │
-│  │                                                       │
-│  ├─ For each enabled provider:                           │
-│  │   ├─ Certificate Status Sync                          │
-│  │   │   ├─ Query pending/processing orders              │
-│  │   │   ├─ Call provider->getOrderStatus()              │
-│  │   │   ├─ Update tblsslorders status + configdata      │
-│  │   │   └─ Send notifications on status change          │
-│  │   │                                                   │
-│  │   ├─ Product Catalog Sync                             │
-│  │   │   ├─ Call provider->fetchProducts()               │
-│  │   │   ├─ Upsert mod_aio_ssl_products                 │
-│  │   │   ├─ Detect price changes → notify               │
-│  │   │   └─ Run auto-mapping for new products            │
-│  │   │                                                   │
-│  │   └─ Expiry Check                                     │
-│  │       ├─ Scan active certs for upcoming expiry        │
-│  │       └─ Send expiry warnings                         │
-│  │                                                       │
-│  └─ Update sync timestamps                               │
-└──────────────────────────────────────────────────────────┘
-```
+**Legacy Order Detection** — admin "Claim" workflow:
+1. AIO displays legacy order as read-only with "Claim" button
+2. Admin clicks "Claim" → AIO creates record in `mod_aio_ssl_orders` with `legacy_table` + `legacy_order_id` populated
+3. Original record untouched (non-destructive)
+4. Future interactions use AIO order
 
 ---
 
@@ -836,11 +786,13 @@ class NicsrsProvider extends AbstractProvider
     protected string $tier = 'full';
     protected string $baseUrl = 'https://portal.nicsrs.com/ssl';
 
-    // Auth: api_token as POST parameter
+    // Auth: api_token as POST form parameter
+    // Content-Type: application/x-www-form-urlencoded
     // Response: JSON { code: 1, msg: "Success", data: {...} }
     // Products: /productList (filterable by vendor)
     // Supported CAs: Sectigo, DigiCert, GlobalSign, GeoTrust,
     //                Thawte, RapidSSL, sslTrus, Entrust, BaiduTrust
+    // NO sandbox environment
 
     public function getCapabilities(): array
     {
@@ -861,11 +813,26 @@ class GoGetSSLProvider extends AbstractProvider
     protected string $tier = 'full';
     protected string $baseUrl = 'https://my.gogetssl.com/api';
 
-    // Auth: POST /auth → token (session-based, cached)
-    // Products use numeric IDs
-    // Supports: add_ssl_order, reissue, renew, cancel, revoke
-    // Has sandbox environment
-    // Brand-specific webserver_type (18 for GeoTrust/RapidSSL/DigiCert/Thawte)
+    // Auth: SESSION-BASED TOKEN
+    //   Step 1: POST /auth/ {user, pass} → {"key":"session_token"}
+    //   Step 2: All requests include auth_key=session_token
+    //   Token cached in provider config, refreshed on expiry/401
+    //
+    // Products use NUMERIC IDs (not string codes)
+    // Has sandbox: https://sandbox.gogetssl.com/api
+    // Brand-specific webserver_type override
+
+    private ?string $authToken = null;
+
+    private function authenticate(): string
+    {
+        $response = $this->post('/auth/', [
+            'user' => $this->credentials['username'],
+            'pass' => $this->credentials['password'],
+        ]);
+        $this->authToken = $response['key'];
+        return $this->authToken;
+    }
 
     public function getCapabilities(): array
     {
@@ -888,12 +855,32 @@ class TheSSLStoreProvider extends AbstractProvider
     protected string $sandboxUrl = 'https://sandbox-wbapi.thesslstore.com/rest';
 
     // Auth: PartnerCode + AuthToken in JSON body (AuthRequest object)
-    // Content-Type: application/json
-    // Products: /product/query
-    // Orders: /order/neworder, /order/status, /order/download,
-    //         /order/reissue, /order/certificaterevokerequest
-    // Invite order: /order/inviteorder (email-based provisioning)
+    // Content-Type: application/json; charset=utf-8
+    //
+    // ⚠️ RENEW: No dedicated /renew endpoint
+    //    Uses /order/neworder with isRenewalOrder=true
+    //    + RelatedTheSSLStoreOrderID for linking
+    //
+    // Has invite order: /order/inviteorder
     // Has mid-term upgrade: /order/midtermupgrade
+
+    protected function buildAuthBody(array $params = []): array
+    {
+        return array_merge([
+            'AuthRequest' => [
+                'PartnerCode' => $this->credentials['partner_code'],
+                'AuthToken'   => $this->credentials['auth_token'],
+            ],
+        ], $params);
+    }
+
+    public function renewCertificate(string $remoteId, array $params): array
+    {
+        // TheSSLStore renew = new order with renewal flag
+        $params['isRenewalOrder'] = true;
+        $params['RelatedTheSSLStoreOrderID'] = $remoteId;
+        return $this->placeOrder($params);
+    }
 
     public function getCapabilities(): array
     {
@@ -915,19 +902,27 @@ class SSL2BuyProvider extends AbstractProvider
     protected string $baseUrl = 'https://api.ssl2buy.com';
 
     // Auth: PartnerEmail + ApiKey in JSON body
-    // Order endpoints:
-    //   /orderservice/order/placeorder
-    //   /orderservice/order/getbalance
-    //   /orderservice/order/getproductprice
-    //   /orderservice/order/getsslconfigurationlink
-    //   /orderservice/order/validateorder
-    // Query endpoints (brand-specific):
-    //   /queryservice/{brand}/getorderdetails
-    //   /queryservice/{brand}/resendapprovalemail
-    //   /queryservice/{brand}/{brand}subscriptionorderdetail
-
+    // Content-Type: application/json
+    //
+    // Order: /orderservice/order/placeorder
+    // Query: /queryservice/{brand}/getorderdetails (brand-specific routing!)
+    // Balance: /orderservice/order/getbalance
+    // Config Link: /orderservice/order/getsslconfigurationlink
+    //
     // ❌ NO: cancel, revoke, reissue, renew, download, DCV management
     // ✅ Fallback: Configuration Link + PIN for manual management
+
+    private function getBrandRoute(string $brandName): string
+    {
+        $brand = strtolower($brandName);
+        return match(true) {
+            in_array($brand, ['comodo', 'sectigo']) => 'comodo',
+            in_array($brand, ['globalsign', 'alphassl']) => 'globalsign',
+            in_array($brand, ['symantec', 'digicert', 'geotrust', 'thawte', 'rapidssl']) => 'symantec',
+            $brand === 'prime' || $brand === 'primessl' => 'prime',
+            default => 'comodo',
+        };
+    }
 
     public function getCapabilities(): array
     {
@@ -935,13 +930,9 @@ class SSL2BuyProvider extends AbstractProvider
                 'resend_approval','config_link'];
     }
 
-    // Methods that throw UnsupportedOperationException:
-    // reissueCertificate(), renewCertificate(), revokeCertificate(),
-    // cancelOrder(), downloadCertificate(), getDcvEmails(), changeDcvMethod()
-
     public function getConfigurationLink(string $orderId): string
     {
-        // Calls GetSSLConfigurationLink API
+        // Calls /orderservice/order/getsslconfigurationlink
         // Returns URL for manual cert management at SSL2Buy portal
     }
 }
@@ -958,17 +949,19 @@ Client purchases SSL product (servertype=aio_ssl)
 │
 └─ WHMCS triggers: aio_ssl_CreateAccount($params)
    │
-   ├─ Check for vendor migration (existing tblsslorders with other module)
-   │   ├─ YES → Show migration warning, offer "Allow New Certificate"
-   │   └─ NO → Continue
+   ├─ Check for legacy orders:
+   │   ├─ Search nicsrs_sslorders WHERE serviceid = X
+   │   ├─ Search tblsslorders WHERE serviceid = X
+   │   ├─ FOUND → Show migration warning, offer "Allow New Certificate"
+   │   └─ NOT FOUND → Continue
    │
    ├─ Resolve provider:
    │   ├─ configoption2 = specific slug → use that provider
    │   ├─ configoption2 = 'auto' → PriceCompareService::getCheapest()
    │   └─ configoption2 = empty → use first enabled provider
    │
-   ├─ Create tblsslorders record:
-   │   ├─ module = 'aio_ssl'
+   ├─ Create mod_aio_ssl_orders record:
+   │   ├─ provider_slug = resolved slug
    │   ├─ certtype = canonical_id from configoption1
    │   ├─ status = 'Awaiting Configuration'
    │   └─ configdata = { provider: slug, canonical_id: ... }
@@ -976,53 +969,30 @@ Client purchases SSL product (servertype=aio_ssl)
    └─ Return success → Client sees "Configure Certificate" in client area
 ```
 
-### 10.2 Certificate Application Flow (Client Area)
-
-```
-Client clicks "Configure Certificate"
-│
-├─ Step 1: CSR
-│   ├─ Option A: Paste existing CSR
-│   ├─ Option B: Auto-generate CSR (key pair stored in configdata)
-│   └─ CSR decoded → domains extracted → save as Draft
-│
-├─ Step 2: Domain Validation
-│   ├─ Provider supports DCV emails? → Fetch email list
-│   ├─ Select method per domain (EMAIL / HTTP / CNAME / HTTPS)
-│   └─ Save DCV choices to configdata
-│
-├─ Step 3: Contacts (OV/EV only)
-│   ├─ Admin contact (pre-filled from client profile)
-│   ├─ Tech contact (option: same as admin)
-│   └─ Organization info
-│
-├─ Step 4: Confirm & Submit
-│   ├─ ProviderBridge::getProvider() → get provider instance
-│   ├─ provider->validateOrder(params)
-│   ├─ provider->placeOrder(params)
-│   ├─ Update tblsslorders: remoteid, status → Pending
-│   └─ configdata updated with full order details
-│
-└─ Auto-sync picks up from here → polls status until Complete
-```
-
-### 10.3 Legacy Order Read Flow
+### 10.2 Legacy Order Read Flow (Unified Order View)
 
 ```
 Admin opens Order Management in AIO
 │
-├─ Query tblsslorders for ALL orders:
-│   WHERE module IN ('aio_ssl','nicsrs_ssl','SSLCENTERWHMCS','thesslstore_ssl','ssl2buy')
-│   OR serviceid IN (services with servertype='aio_ssl')
+├─ UnifiedOrderService::getAllOrders()
+│   │
+│   ├─ Query mod_aio_ssl_orders (AIO native orders)
+│   │   → Mark each as source='aio', editable=true
+│   │
+│   ├─ Query nicsrs_sslorders (legacy NicSRS)
+│   │   → Normalize configdata format
+│   │   → Mark as source='legacy_nicsrs', editable=false, provider='nicsrs'
+│   │
+│   └─ Query tblsslorders WHERE module IN ('SSLCENTERWHMCS','thesslstore_ssl',
+│       'thesslstore','ssl2buy')
+│       → Normalize configdata format (json_decode or unserialize)
+│       → Map module name to provider slug
+│       → Mark as source='legacy_tblssl', editable=false
 │
-├─ For each order:
-│   ├─ module = 'aio_ssl' → use configdata.provider to resolve provider
-│   ├─ module = 'nicsrs_ssl' → treat as NicSRS provider (read-only unless claimed)
-│   ├─ module = 'SSLCENTERWHMCS' → treat as GoGetSSL provider (read-only unless claimed)
-│   ├─ module = 'thesslstore_ssl' → treat as TheSSLStore (read-only unless claimed)
-│   └─ module = 'ssl2buy' → treat as SSL2Buy (read-only unless claimed)
-│
-└─ Display unified table with provider badge
+└─ Display unified table with:
+   ├─ Provider badge (color-coded)
+   ├─ Source indicator (AIO / Legacy)
+   └─ "Claim" button for legacy orders
 ```
 
 ---
@@ -1031,33 +1001,33 @@ Admin opens Order Management in AIO
 
 ### 11.1 Legacy Module Detection
 
-| Legacy Module | Module Name in `tblsslorders` | configdata Format |
-|--------------|-------------------------------|-------------------|
-| NicSRS | `nicsrs_ssl` | JSON with `csr`, `crt`, `ca`, `private_key`, `domainInfo`, `beginDate`, `endDate` |
-| GoGetSSL | `SSLCENTERWHMCS` | JSON/serialized with `csr`, `crt`, `ca`, `approver_email`, `order_id` |
-| TheSSLStore | `thesslstore_ssl` | JSON with `csr`, `TheSSLStoreOrderID`, `crt_code`, `ca_code` |
-| SSL2Buy | `ssl2buy` | JSON with `orderId`, `csr`, `brand_name`, configdata varies by CA |
+| Legacy Module | Server Module Name | Table | configdata Format |
+|--------------|-------------------|-------|-------------------|
+| NicSRS | `nicsrs_ssl` | `nicsrs_sslorders` | JSON: `csr`, `crt`, `ca`, `private_key`, `domainInfo`, `applyReturn.beginDate/endDate` |
+| GoGetSSL | `SSLCENTERWHMCS` | `tblsslorders` | JSON or serialized: `csr`, `crt`, `ca`, `approver_email`, `order_id` |
+| TheSSLStore | `thesslstore_ssl` / `thesslstore` | `tblsslorders` | JSON: `csr`, `TheSSLStoreOrderID`, `crt_code`, `ca_code` |
+| SSL2Buy | `ssl2buy` | `tblsslorders` | JSON: `orderId`, `csr`, `brand_name`, varies by CA |
 
 ### 11.2 configdata Normalization
-
-The `MigrationService` normalizes legacy configdata formats:
 
 ```php
 class MigrationService
 {
-    public function normalizeConfigdata(string $module, $configdata): array
+    public function normalizeConfigdata(string $module, $rawConfigdata): array
     {
-        $data = is_string($configdata) ? json_decode($configdata, true) : (array)$configdata;
-
-        // Fall back to unserialize for old WHMCS versions
-        if (empty($data) && is_string($configdata)) {
-            $data = @unserialize($configdata);
+        // WHMCS 7.3+ uses json, older uses serialize
+        if (is_string($rawConfigdata)) {
+            $data = json_decode($rawConfigdata, true);
+            if (json_last_error() !== JSON_ERROR_NONE) {
+                $data = @unserialize($rawConfigdata);
+            }
         }
+        $data = (array) ($data ?? []);
 
         return match ($module) {
             'nicsrs_ssl'      => $this->normalizeNicsrs($data),
             'SSLCENTERWHMCS'  => $this->normalizeGoGetSSL($data),
-            'thesslstore_ssl' => $this->normalizeTheSSLStore($data),
+            'thesslstore_ssl', 'thesslstore' => $this->normalizeTheSSLStore($data),
             'ssl2buy'         => $this->normalizeSSL2Buy($data),
             default           => $data,
         };
@@ -1065,22 +1035,15 @@ class MigrationService
 }
 ```
 
-### 11.3 Client Interaction with Legacy Orders
+### 11.3 Zero-Downtime Transition Plan
 
-When a client views a service linked to a legacy SSL order:
-1. AIO server module checks `tblsslorders` for matching `serviceid`
-2. If `module` != `aio_ssl`, render `migrated.tpl` (read-only view)
-3. Shows: certificate details, status, expiry, domains, download (if cert available)
-4. Admin can "Claim" the order → updates module to `aio_ssl`, enriches configdata
-
-### 11.4 Zero-Downtime Transition Plan
-
-1. Install AIO module alongside existing modules
-2. AIO reads from `tblsslorders` without modifying legacy records
-3. New products created with `servertype=aio_ssl`
-4. Existing products can be gradually switched (`servertype` change)
+1. Install AIO module **alongside** existing modules (no conflicts)
+2. AIO reads legacy tables without modifying them
+3. New WHMCS products created with `servertype=aio_ssl`
+4. Existing products gradually switched (change `servertype` to `aio_ssl`)
 5. `CreateAccount` detects legacy cert → offers migration
-6. Legacy modules can be deactivated after all orders are claimed
+6. Admin "Claims" legacy orders one-by-one or in bulk
+7. Legacy modules deactivated only after all active orders are claimed
 
 ---
 
@@ -1088,7 +1051,7 @@ When a client views a service linked to a legacy SSL order:
 
 ### 12.1 Credential Encryption
 
-All provider API credentials encrypted at rest using AES-256-CBC:
+All provider API credentials encrypted at rest using AES-256-CBC with HMAC integrity verification:
 
 ```php
 class EncryptionService
@@ -1101,16 +1064,25 @@ class EncryptionService
 
     public static function encrypt(string $plaintext): string
     {
+        $key = self::getKey();
         $iv = random_bytes(16);
-        $encrypted = openssl_encrypt($plaintext, 'AES-256-CBC', self::getKey(), 0, $iv);
-        return base64_encode($iv . '::' . $encrypted);
+        $encrypted = openssl_encrypt($plaintext, 'AES-256-CBC', $key, 0, $iv);
+        $hmac = hash_hmac('sha256', $iv . $encrypted, $key);
+        return base64_encode($iv . '::' . $hmac . '::' . $encrypted);
     }
 
     public static function decrypt(string $ciphertext): string
     {
-        $data = base64_decode($ciphertext);
-        [$iv, $encrypted] = explode('::', $data, 2);
-        return openssl_decrypt($encrypted, 'AES-256-CBC', self::getKey(), 0, $iv);
+        $key = self::getKey();
+        $parts = explode('::', base64_decode($ciphertext), 3);
+        if (count($parts) !== 3) throw new \Exception('Invalid encrypted data');
+        [$iv, $hmac, $encrypted] = $parts;
+
+        // Verify integrity
+        $calcHmac = hash_hmac('sha256', $iv . $encrypted, $key);
+        if (!hash_equals($calcHmac, $hmac)) throw new \Exception('Data integrity check failed');
+
+        return openssl_decrypt($encrypted, 'AES-256-CBC', $key, 0, $iv);
     }
 }
 ```
@@ -1118,99 +1090,155 @@ class EncryptionService
 ### 12.2 Access Control
 
 - Admin area: WHMCS admin session required (`defined('ADMINAREA')`)
-- Client area: `ServiceOwnership` validation via `tblhosting.userid`
-- AJAX requests: CSRF + session validation
+- Client area: Service ownership validation (`tblhosting.userid` = session user)
+- AJAX requests: CSRF + session validation via `ActionDispatcher::validateAccess()`
 - API tokens masked in all logs (first 8 chars + `***`)
+- GoGetSSL session tokens cached in memory only, never persisted to DB
 
 ### 12.3 Input Validation
 
-- All user inputs sanitized via `htmlspecialchars()` + Capsule ORM parameterized queries
+- All user inputs sanitized via `htmlspecialchars()` + Capsule ORM (parameterized queries)
 - CSR format validated before API submission
 - Domain names validated with regex
 - JSON payloads validated with `json_last_error()`
-- File uploads (CSR/key files) validated for content type and size
 
 ---
 
 ## 13. UI/UX Design Specifications
 
-### 13.1 Admin Navigation
+### 13.1 Design System: Ant Design-Inspired
+
+**Mandatory**: Follow existing NicSRS module design patterns for visual consistency.
+
+CSS variables (matching existing modules):
+```css
+:root {
+    --aio-primary: #1890ff;
+    --aio-success: #52c41a;
+    --aio-warning: #faad14;
+    --aio-danger: #ff4d4f;
+    --aio-info: #1890ff;
+    --aio-text: #595959;
+    --aio-text-secondary: #8c8c8c;
+    --aio-heading: #262626;
+    --aio-border: #d9d9d9;
+    --aio-bg: #f5f5f5;
+    --aio-white: #ffffff;
+}
+```
+
+Font stack: `-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif`
+
+### 13.2 Admin Navigation
 
 ```
 Addons → AIO SSL Manager
 │
-├── Dashboard         — Unified stats, charts, alerts
+├── Dashboard         — Unified stats, charts (Chart.js), alerts
 ├── Providers         — Add/edit/test/disable providers
 ├── Products          — Catalog browser, sync, mapping
 ├── Price Compare     — Cross-provider price matrix
-├── Orders            — Unified order list, detail, actions
+├── Orders            — Unified order list (3 sources), detail, actions
 ├── Import            — Legacy migration, API import, bulk import
 ├── Reports           — Revenue, performance, expiry forecast
 └── Settings          — Sync config, notifications, currency
 ```
 
-### 13.2 Provider Management UI
+---
 
-```
-┌──────────────────────────────────────────────────────────┐
-│  Providers                                    [+ Add]    │
-├────┬──────────┬──────┬─────────┬──────────┬──────┬──────┤
-│ #  │ Provider │ Tier │ Status  │ API Test │ Sync │ Act. │
-├────┼──────────┼──────┼─────────┼──────────┼──────┼──────┤
-│ 1  │ NicSRS   │ Full │ 🟢 On  │ ✅ OK    │ 2m   │ ⚙️   │
-│ 2  │ GoGetSSL │ Full │ 🟢 On  │ ✅ OK    │ 5m   │ ⚙️   │
-│ 3  │ TheSSLSt │ Full │ 🟢 On  │ ✅ OK    │ 8m   │ ⚙️   │
-│ 4  │ SSL2Buy  │ Ltd  │ 🟡 On  │ ✅ OK    │ 3m   │ ⚙️   │
-└────┴──────────┴──────┴─────────┴──────────┴──────┴──────┘
+## 14. WHMCS Template Engine Rules
+
+> **CRITICAL**: This section documents WHMCS's template engine constraints that must be followed.
+
+### 14.1 Admin Addon Module → PHP Templates
+
+WHMCS admin addon modules render via the `_output($vars)` function which outputs HTML directly. **Smarty is NOT available** in admin addon context.
+
+**Pattern** (from NicSRS reference):
+```php
+// BaseController.php
+protected function includeTemplate(string $template, array $data = []): void
+{
+    $data['modulelink'] = $this->modulelink;
+    $data['lang'] = $this->lang;
+    $data['helper'] = $this->viewHelper;
+    extract($data);
+
+    $templateFile = AIO_ADMIN_PATH . "/templates/{$template}.php";
+    if (file_exists($templateFile)) {
+        include $templateFile;
+    }
+}
 ```
 
-### 13.3 Price Comparison UI
+Templates are **plain PHP files** using `<?php ?>` and `<?= ?>` for output:
+```php
+<!-- templates/dashboard.php -->
+<div class="aio-stats-grid">
+    <div class="aio-stat-card">
+        <div class="aio-stat-value"><?= $totalOrders ?></div>
+        <div class="aio-stat-label"><?= $lang['total_orders'] ?></div>
+    </div>
+</div>
+```
 
+### 14.2 Server Module Client Area → Smarty Templates
+
+WHMCS server modules use Smarty `.tpl` templates for the client area. The `ClientArea` function returns:
+```php
+return [
+    'templatefile' => 'path/to/template',  // .tpl extension auto-added
+    'vars' => ['key' => 'value'],
+];
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│  Price Compare: Sectigo PositiveSSL                              │
-│  Validation: DV | Type: Single Domain | Wildcard: No             │
-├──────────┬──────────┬──────────┬──────────┬─────────────────────┤
-│ Provider │ 1 Year   │ 2 Years  │ 3 Years  │ SAN (per/yr)       │
-├──────────┼──────────┼──────────┼──────────┼─────────────────────┤
-│ NicSRS   │ $7.95    │ $15.90   │ $23.85   │ N/A                │
-│          │ ★ Best   │          │ ★ Best   │                     │
-│ GoGetSSL │ $8.50    │ $16.00   │ $24.00   │ N/A                │
-│ TheSSLSt │ $9.50    │ $18.00   │ $27.00   │ N/A                │
-│ SSL2Buy  │ $8.00    │ $15.50 ★ │ $24.50  │ N/A                │
-├──────────┴──────────┴──────────┴──────────┴─────────────────────┤
-│ WHMCS Sell Price: $24.99/yr  │  Best Margin: NicSRS ($17.04)    │
-└──────────────────────────────────────────────────────────────────┘
+
+Templates use Smarty syntax:
+```smarty
+{* view/applycert.tpl *}
+<div class="sslm-container">
+    <h1>{$_LANG.apply_title}</h1>
+    <form id="ssl-apply-form">
+        <input type="hidden" name="serviceid" value="{$serviceid}" />
+    </form>
+</div>
 ```
+
+### 14.3 Template Summary
+
+| Module | Template Location | Engine | Extension | Example |
+|--------|------------------|--------|-----------|---------|
+| Admin Addon (`aio_ssl_admin`) | `templates/*.php` | Plain PHP | `.php` | `<?= $helper->e($order->domain) ?>` |
+| Server Client Area (`aio_ssl`) | `view/*.tpl` | Smarty | `.tpl` | `{$order.domain\|escape}` |
+| Server Admin Tab | Inline PHP in module function | PHP | N/A | Direct HTML string return |
 
 ---
 
-## 14. Implementation Plan
+## 15. Implementation Plan
 
 ### Phase 1: Foundation (Est. 80h)
 
 | # | Task | Priority | Est. |
 |---|------|----------|------|
 | 1.1 | Project scaffolding: file structure, autoloader, module entry points | Critical | 8h |
-| 1.2 | Database schema: all 5 custom tables + migration script | Critical | 8h |
+| 1.2 | Database schema: all 6 custom tables + activation SQL | Critical | 8h |
 | 1.3 | `ProviderInterface`, `AbstractProvider`, `ProviderFactory`, `ProviderRegistry` | Critical | 12h |
-| 1.4 | `EncryptionService` for credential storage | Critical | 4h |
-| 1.5 | Provider CRUD: `ProviderController` + template | Critical | 12h |
+| 1.4 | `EncryptionService` for credential storage (AES-256-CBC + HMAC) | Critical | 4h |
+| 1.5 | Provider CRUD: `ProviderController` + PHP template | Critical | 12h |
 | 1.6 | NicSRS provider plugin (port from existing module) | Critical | 16h |
 | 1.7 | Settings controller with sync configuration | High | 8h |
-| 1.8 | Basic admin navigation + Bootstrap UI framework | High | 8h |
+| 1.8 | Admin navigation + Ant Design CSS framework | High | 8h |
 | 1.9 | Activation/deactivation/upgrade handlers | High | 4h |
 
 ### Phase 2: Provider Plugins (Est. 100h)
 
 | # | Task | Priority | Est. |
 |---|------|----------|------|
-| 2.1 | GoGetSSL provider plugin (auth, products, lifecycle) | Critical | 24h |
-| 2.2 | TheSSLStore provider plugin (REST JSON, full lifecycle) | Critical | 24h |
-| 2.3 | SSL2Buy provider plugin (limited tier, brand routing) | Critical | 20h |
-| 2.4 | Product catalog sync service (all providers) | Critical | 12h |
-| 2.5 | `ProductMapService` — auto-mapping + admin UI | Critical | 12h |
-| 2.6 | `PriceCompareService` + comparison UI | High | 8h |
+| 2.1 | GoGetSSL provider plugin (session auth, numeric IDs, lifecycle) | Critical | 24h |
+| 2.2 | TheSSLStore provider plugin (JSON auth, renewal-as-new-order) | Critical | 24h |
+| 2.3 | SSL2Buy provider plugin (limited tier, brand-based routing) | Critical | 20h |
+| 2.4 | Product catalog sync service (all providers, normalized) | Critical | 12h |
+| 2.5 | `ProductMapService` — auto-mapping + admin PHP template | Critical | 12h |
+| 2.6 | `PriceCompareService` + comparison PHP template | High | 8h |
 
 ### Phase 3: Server Module & Client Area (Est. 80h)
 
@@ -1218,123 +1246,91 @@ Addons → AIO SSL Manager
 |---|------|----------|------|
 | 3.1 | Server module: ConfigOptions, CreateAccount, MetaData | Critical | 8h |
 | 3.2 | `ProviderBridge` — resolves provider from service/order | Critical | 8h |
-| 3.3 | Multi-step client area (apply, CSR, DCV, contacts) | Critical | 20h |
-| 3.4 | Certificate download, reissue, renew, revoke actions | Critical | 16h |
-| 3.5 | SSL2Buy limited-tier client area (config link + PIN) | High | 8h |
-| 3.6 | Admin service tab + custom buttons | High | 8h |
-| 3.7 | Client area templates (apply, pending, complete, migrated) | High | 12h |
+| 3.3 | Multi-step client area — Smarty templates (apply, CSR, DCV, contacts) | Critical | 20h |
+| 3.4 | Certificate download, reissue, renew, revoke — Smarty templates | Critical | 16h |
+| 3.5 | SSL2Buy limited-tier client area — Smarty template (config link) | High | 8h |
+| 3.6 | Admin service tab (inline PHP) + custom buttons | High | 8h |
+| 3.7 | Client area CSS (Ant Design-inspired, matching NicSRS) | High | 12h |
 
 ### Phase 4: Dashboard, Reports, Migration (Est. 90h)
 
 | # | Task | Priority | Est. |
 |---|------|----------|------|
-| 4.1 | Unified dashboard with Chart.js | High | 12h |
-| 4.2 | Order management controller (list, detail, actions) | Critical | 16h |
-| 4.3 | Auto-sync engine via WHMCS hooks | Critical | 12h |
-| 4.4 | Notification service (issuance, expiry, sync errors, price changes) | High | 8h |
-| 4.5 | Legacy module migration service | Critical | 16h |
-| 4.6 | Import controller (single, bulk, API import) | High | 8h |
-| 4.7 | Report service (revenue, performance, by provider) | Medium | 10h |
-| 4.8 | Multi-language (English + Vietnamese) | Medium | 8h |
+| 4.1 | `UnifiedOrderService` — reads from 3 tables | Critical | 12h |
+| 4.2 | Dashboard PHP template with Chart.js | High | 12h |
+| 4.3 | Order management controller (list, detail, actions) — PHP template | Critical | 16h |
+| 4.4 | Auto-sync engine via WHMCS hooks | Critical | 12h |
+| 4.5 | `MigrationService` + configdata normalizer | Critical | 12h |
+| 4.6 | Import controller (single, bulk, legacy claim) — PHP template | High | 8h |
+| 4.7 | Notification service (HTML emails via WHMCS SendAdminEmail) | High | 8h |
+| 4.8 | Report service + PHP template | Medium | 6h |
+| 4.9 | Multi-language (English + Vietnamese) | Medium | 4h |
 
 ### Total Estimated: ~350 hours
 
-### Milestone Summary
-
-| Phase | Milestone | Deliverable |
-|-------|-----------|-------------|
-| Phase 1 | Foundation complete | Working admin with provider CRUD, NicSRS integrated |
-| Phase 2 | All providers integrated | 4 providers functional, price comparison working |
-| Phase 3 | Client area complete | Full certificate lifecycle for all providers |
-| Phase 4 | Production ready | Dashboard, reports, migration, notifications |
-
 ---
 
-## 15. Risk Assessment
+## 16. Risk Assessment
 
 | Risk | Impact | Probability | Mitigation |
 |------|--------|-------------|------------|
-| SSL2Buy API too limited for basic management | High | Confirmed | Two-tier architecture with config link fallback |
+| SSL2Buy API too limited for management | High | Confirmed | Two-tier architecture + config link fallback |
 | Provider API changes break integration | Medium | Low | Abstract provider interface isolates changes |
-| Legacy configdata format inconsistencies | High | Medium | Thorough format analysis + fallback parsing |
-| Performance with 10K+ orders across providers | Medium | Low | Database indexing, pagination, lazy loading |
+| Legacy configdata format varies (JSON vs serialized) | High | Confirmed | Dual-parsing: `json_decode` → `unserialize` fallback |
+| NicSRS uses custom table vs others use `tblsslorders` | High | Confirmed | `UnifiedOrderService` reads both tables |
+| GoGetSSL session token expiry during long operations | Medium | Medium | Auto-refresh on 401, token caching in memory |
+| Performance with 10K+ orders across 3 tables | Medium | Low | Indexed queries, pagination, UNION optimizations |
 | WHMCS version incompatibility | Medium | Low | Target 7.10+, use Capsule ORM, test on 8.x |
-| Credential security breach | Critical | Low | AES-256-CBC encryption, masked logging |
-| Concurrent sync conflicts (multiple cron runs) | Medium | Medium | File-based lock + `sync_error_count` tracking |
 | Product mapping errors (wrong canonical match) | Medium | Medium | Admin review UI + manual override capability |
+| Concurrent sync conflicts | Medium | Medium | File-based lock + error count tracking |
 
 ---
 
-## Appendix A: WHMCS `tblsslorders` Schema Reference
+## Appendix A: Provider Authentication Code Examples
 
-```sql
-CREATE TABLE `tblsslorders` (
-  `id` int(10) NOT NULL AUTO_INCREMENT,
-  `userid` int(10) NOT NULL DEFAULT 0,
-  `serviceid` int(10) NOT NULL DEFAULT 0,
-  `addon_id` int(10) NOT NULL DEFAULT 0,
-  `remoteid` varchar(255) NOT NULL DEFAULT '',
-  `module` varchar(255) NOT NULL DEFAULT '',
-  `certtype` varchar(255) NOT NULL DEFAULT '',
-  `completiondate` datetime NOT NULL DEFAULT '0000-00-00 00:00:00',
-  `status` varchar(255) NOT NULL DEFAULT '',
-  `configdata` text,
-  PRIMARY KEY (`id`),
-  KEY `userid` (`userid`),
-  KEY `serviceid` (`serviceid`),
-  KEY `addon_id` (`addon_id`),
-  KEY `remoteid` (`remoteid`),
-  KEY `status` (`status`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
-```
-
----
-
-## Appendix B: Provider Authentication Reference
-
-### B.1 NicSRS
+### A.1 NicSRS
 ```php
 // POST with api_token as form field
 $data = ['api_token' => $token, 'vendor' => 'Sectigo'];
-$response = curl_post('https://portal.nicsrs.com/ssl/productList', http_build_query($data));
+curl_post($this->baseUrl . '/productList', http_build_query($data), [
+    'Content-Type: application/x-www-form-urlencoded',
+]);
 ```
 
-### B.2 GoGetSSL
+### A.2 GoGetSSL (Session-Based)
 ```php
 // Step 1: Authenticate → get session token
-$auth = curl_post('https://my.gogetssl.com/api/auth/', http_build_query([
+$auth = curl_post($this->baseUrl . '/auth/', http_build_query([
     'user' => $username, 'pass' => $password
 ]));
-$token = $auth['key'];
+$authKey = $auth['key']; // Cache this, refresh on 401
 
-// Step 2: Use token for subsequent calls
-$products = curl_get('https://my.gogetssl.com/api/products/?auth_key=' . $token);
+// Step 2: Use auth_key for subsequent calls
+$products = curl_get($this->baseUrl . '/products/?auth_key=' . $authKey);
 ```
 
-### B.3 TheSSLStore
+### A.3 TheSSLStore (JSON Body Auth)
 ```php
-// JSON body with AuthRequest object
 $payload = json_encode([
     'AuthRequest' => [
         'PartnerCode' => $partnerCode,
         'AuthToken' => $authToken,
     ]
 ]);
-$response = curl_post('https://api.thesslstore.com/rest/product/query', $payload, [
+curl_post($this->baseUrl . '/product/query', $payload, [
     'Content-Type: application/json; charset=utf-8'
 ]);
 ```
 
-### B.4 SSL2Buy
+### A.4 SSL2Buy (JSON Body Auth)
 ```php
-// JSON body with PartnerEmail + ApiKey
 $payload = json_encode([
     'PartnerEmail' => $email,
     'ApiKey' => $apiKey,
     'ProductCode' => 351,
     'NumberOfMonths' => 12
 ]);
-$response = curl_post('https://api.ssl2buy.com/orderservice/order/getproductprice', $payload, [
+curl_post($this->baseUrl . '/orderservice/order/getproductprice', $payload, [
     'Content-Type: application/json'
 ]);
 ```
@@ -1342,4 +1338,5 @@ $response = curl_post('https://api.ssl2buy.com/orderservice/order/getproductpric
 ---
 
 **© HVN GROUP** — All rights reserved.  
-**Document Version:** 1.0.0 | **Status:** Ready for Implementation
+**Document Version:** 1.1.0 | **Status:** Ready for Implementation  
+**Revision Note:** v1.1.0 — Fixed template engine rules (PHP vs Smarty), corrected NicSRS custom table architecture, updated GoGetSSL session auth, fixed TheSSLStore renew mechanism, aligned UI framework to Ant Design.
