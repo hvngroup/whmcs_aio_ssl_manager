@@ -6,6 +6,6 @@ class ImportController extends BaseController
 {
     public function render(string $action = ''): void
     {
-        $this->renderTemplate('import.tpl', []);
+        $this->renderTemplate('import.php', []);
     }
 }

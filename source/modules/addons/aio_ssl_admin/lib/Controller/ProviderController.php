@@ -98,21 +98,16 @@ class ProviderController extends BaseController
     {
         $providers = ProviderRegistry::getAllRecords();
         $registeredSlugs = ProviderFactory::getRegisteredSlugs();
-
-        // Determine which providers can still be added
         $existingSlugs = array_map(function ($p) { return $p->slug; }, $providers);
         $availableSlugs = array_diff($registeredSlugs, $existingSlugs);
 
-        $this->renderTemplate('providers.tpl', [
+        $this->renderTemplate('providers.php', [
             'providers'      => $providers,
             'availableSlugs' => $availableSlugs,
             'canAdd'         => !empty($availableSlugs),
         ]);
     }
 
-    /**
-     * Render add provider form
-     */
     private function renderAddForm(): void
     {
         $existingSlugs = array_map(
@@ -121,7 +116,7 @@ class ProviderController extends BaseController
         );
         $availableSlugs = array_diff(ProviderFactory::getRegisteredSlugs(), $existingSlugs);
 
-        $this->renderTemplate('provider_form.tpl', [
+        $this->renderTemplate('provider_edit.php', [
             'mode'             => 'add',
             'provider'         => null,
             'availableSlugs'   => $availableSlugs,
@@ -130,9 +125,6 @@ class ProviderController extends BaseController
         ]);
     }
 
-    /**
-     * Render edit provider form
-     */
     private function renderEditForm(): void
     {
         $id = (int)$this->input('id');
@@ -143,7 +135,6 @@ class ProviderController extends BaseController
             return;
         }
 
-        // Decrypt credentials for form (masked display)
         $credentials = [];
         if (!empty($provider->api_credentials)) {
             try {
@@ -155,7 +146,7 @@ class ProviderController extends BaseController
 
         $fields = $this->credentialFields[$provider->slug] ?? [];
 
-        $this->renderTemplate('provider_form.tpl', [
+        $this->renderTemplate('provider_edit.php', [
             'mode'             => 'edit',
             'provider'         => $provider,
             'credentials'      => $credentials,

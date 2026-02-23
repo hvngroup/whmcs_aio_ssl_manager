@@ -1,4 +1,11 @@
 <?php
+/**
+ * Currency Helper — USD/VND conversion and formatting
+ *
+ * @package    AioSSL\Helper
+ * @author     HVN GROUP <dev@hvn.vn>
+ * @copyright  2026 HVN GROUP (https://hvn.vn)
+ */
 
 namespace AioSSL\Helper;
 
@@ -6,52 +13,91 @@ use WHMCS\Database\Capsule;
 
 class CurrencyHelper
 {
-    /** @var float|null Cached exchange rate */
-    private static $rate = null;
+    /** @var float USD → VND exchange rate */
+    private $usdVndRate;
 
-    /**
-     * Get USD to VND exchange rate
-     */
-    public static function getRate(): float
+    /** @var string Display mode: 'usd' | 'vnd' | 'both' */
+    private $displayMode;
+
+    public function __construct()
     {
-        if (self::$rate !== null) return self::$rate;
-
-        try {
-            $val = Capsule::table('mod_aio_ssl_settings')
-                ->where('setting', 'currency_usd_vnd_rate')
-                ->value('value');
-            self::$rate = (float)($val ?: 25000);
-        } catch (\Exception $e) {
-            self::$rate = 25000;
-        }
-
-        return self::$rate;
+        $this->usdVndRate = (float)$this->getSetting('currency_usd_vnd_rate', 25000);
+        $this->displayMode = $this->getSetting('currency_display', 'usd');
     }
 
     /**
-     * Format price based on currency display setting
+     * Format price for display based on settings
+     *
+     * @param float|null $usdAmount Amount in USD
+     * @return string Formatted price string
      */
-    public static function formatPrice(float $usdPrice, ?string $displayMode = null): string
+    public function format(?float $usdAmount): string
     {
-        if ($displayMode === null) {
-            try {
-                $displayMode = Capsule::table('mod_aio_ssl_settings')
-                    ->where('setting', 'currency_display')
-                    ->value('value') ?: 'usd';
-            } catch (\Exception $e) {
-                $displayMode = 'usd';
-            }
-        }
+        if ($usdAmount === null) return '—';
 
-        switch ($displayMode) {
+        switch ($this->displayMode) {
             case 'vnd':
-                $vnd = $usdPrice * self::getRate();
-                return number_format($vnd, 0, ',', '.') . ' ₫';
+                return $this->formatVnd($usdAmount * $this->usdVndRate);
             case 'both':
-                $vnd = $usdPrice * self::getRate();
-                return '$' . number_format($usdPrice, 2) . ' (' . number_format($vnd, 0, ',', '.') . ' ₫)';
-            default: // usd
-                return '$' . number_format($usdPrice, 2);
+                return $this->formatUsd($usdAmount) . ' <small class="text-muted">(' . $this->formatVnd($usdAmount * $this->usdVndRate) . ')</small>';
+            default:
+                return $this->formatUsd($usdAmount);
+        }
+    }
+
+    public function formatUsd(float $amount): string
+    {
+        return '$' . number_format($amount, 2);
+    }
+
+    public function formatVnd(float $amount): string
+    {
+        return number_format($amount, 0, ',', '.') . ' ₫';
+    }
+
+    /**
+     * Convert USD to VND
+     */
+    public function toVnd(float $usd): float
+    {
+        return $usd * $this->usdVndRate;
+    }
+
+    /**
+     * Convert VND to USD
+     */
+    public function toUsd(float $vnd): float
+    {
+        return $this->usdVndRate > 0 ? $vnd / $this->usdVndRate : 0;
+    }
+
+    public function getRate(): float
+    {
+        return $this->usdVndRate;
+    }
+
+    public function getDisplayMode(): string
+    {
+        return $this->displayMode;
+    }
+
+    /**
+     * Update exchange rate from API (exchangerate-api.com)
+     * Planned feature — currently returns stored rate.
+     */
+    public function updateRateFromApi(): ?float
+    {
+        // Future: fetch from https://v6.exchangerate-api.com/v6/{key}/pair/USD/VND
+        return null;
+    }
+
+    private function getSetting(string $key, $default = null)
+    {
+        try {
+            $row = Capsule::table('mod_aio_ssl_settings')->where('setting', $key)->first();
+            return $row ? $row->value : $default;
+        } catch (\Exception $e) {
+            return $default;
         }
     }
 }

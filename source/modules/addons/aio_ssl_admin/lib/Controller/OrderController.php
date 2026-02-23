@@ -1,3 +1,5 @@
+<?php
+
 namespace AioSSL\Controller;
 
 use WHMCS\Database\Capsule;
@@ -79,7 +81,7 @@ class OrderController extends BaseController
             ->get()
             ->toArray();
 
-        $this->renderTemplate('orders.tpl', [
+        $this->renderTemplate('orders.php', [
             'orders'     => $orders,
             'pagination' => $pagination,
             'filters'    => compact('statusFilter', 'providerFilter', 'search'),
@@ -110,7 +112,7 @@ class OrderController extends BaseController
         // Activity log for this order
         $activities = ActivityLogger::getRecent(20, 'order', (string)$order->id);
 
-        $this->renderTemplate('order_detail.tpl', [
+        $this->renderTemplate('order_detail.php', [
             'order'      => $order,
             'configdata' => $configdata,
             'activities' => $activities,

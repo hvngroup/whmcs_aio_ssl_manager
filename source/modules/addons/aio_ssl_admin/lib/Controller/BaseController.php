@@ -67,12 +67,16 @@ abstract class BaseController
     // ─── Template Rendering ────────────────────────────────────────
 
     /**
-     * Render a Smarty template (WHMCS admin template engine)
+     * Render a PHP template via extract() + include
      *
-     * @param string $template Template filename (without path)
-     * @param array  $data     Template variables
+     * CONSTRAINT C1: WHMCS admin addon does NOT support Smarty.
+     * All templates must be plain .php files using <?= ?> for output.
+     *
+     * @param string $template Template filename (e.g. 'dashboard.php')
+     * @param array  $data     Variables to pass to template
      * @return void
      */
+
     protected function renderTemplate(string $template, array $data = []): void
     {
         $templatePath = AIO_SSL_TEMPLATE_PATH . '/' . $template;

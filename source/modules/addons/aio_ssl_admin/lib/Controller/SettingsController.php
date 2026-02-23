@@ -1,64 +1,39 @@
 <?php
+/**
+ * Settings Controller — Load/save settings, trigger manual sync
+ *
+ * @package    AioSSL\Controller
+ * @author     HVN GROUP <dev@hvn.vn>
+ * @copyright  2026 HVN GROUP (https://hvn.vn)
+ */
 
 namespace AioSSL\Controller;
 
 use WHMCS\Database\Capsule;
 use AioSSL\Core\ActivityLogger;
+use AioSSL\Core\ProviderRegistry;
 
 class SettingsController extends BaseController
 {
-    /** @var array All configurable settings with metadata */
-    private $settingsDef = [
-        'sync' => [
-            'sync_enabled'          => ['type' => 'bool',   'label' => 'Enable Auto-Sync'],
-            'sync_status_interval'  => ['type' => 'select', 'label' => 'Status Sync Interval (hours)',  'options' => [1,2,3,6,12,24]],
-            'sync_product_interval' => ['type' => 'select', 'label' => 'Product Sync Interval (hours)', 'options' => [6,12,24,48,72,168]],
-            'sync_batch_size'       => ['type' => 'select', 'label' => 'Sync Batch Size',               'options' => [10,25,50,100,200]],
-        ],
-        'notifications' => [
-            'notify_issuance'     => ['type' => 'bool',   'label' => 'Notify on Certificate Issuance'],
-            'notify_expiry'       => ['type' => 'bool',   'label' => 'Notify on Expiry Warning'],
-            'notify_expiry_days'  => ['type' => 'select', 'label' => 'Expiry Warning Days',  'options' => [7,14,30,60,90]],
-            'notify_sync_errors'  => ['type' => 'bool',   'label' => 'Notify on Sync Errors'],
-            'notify_price_changes'=> ['type' => 'bool',   'label' => 'Notify on Price Changes'],
-            'notify_admin_email'  => ['type' => 'text',   'label' => 'Admin Email Override (blank = default)'],
-        ],
-        'display' => [
-            'items_per_page'  => ['type' => 'select', 'label' => 'Items Per Page', 'options' => [10,25,50,100]],
-            'date_format'     => ['type' => 'select', 'label' => 'Date Format', 'options' => ['Y-m-d','d/m/Y','m/d/Y','d-M-Y']],
-        ],
-        'currency' => [
-            'currency_display'      => ['type' => 'select', 'label' => 'Currency Display', 'options' => ['usd','vnd','both']],
-            'currency_usd_vnd_rate' => ['type' => 'text',   'label' => 'USD → VND Exchange Rate'],
-        ],
+    /** @var array Saveable setting keys (whitelist) */
+    private $allowedKeys = [
+        'items_per_page', 'date_format',
+        'sync_enabled', 'sync_status_interval', 'sync_product_interval', 'sync_batch_size',
+        'notify_issuance', 'notify_expiry', 'notify_expiry_days',
+        'notify_sync_errors', 'notify_price_changes', 'notify_admin_email',
+        'currency_display', 'currency_usd_vnd_rate',
     ];
 
     public function render(string $action = ''): void
     {
-        // Load current values
-        $settings = [];
-        $rows = Capsule::table('mod_aio_ssl_settings')->get();
-        foreach ($rows as $row) {
-            $settings[$row->setting] = $row->value;
-        }
+        $settings = $this->loadAllSettings();
 
-        // Get sync status info
-        $syncInfo = [
-            'last_product_sync' => $settings['last_product_sync'] ?? 'Never',
-            'last_status_sync'  => $settings['last_status_sync'] ?? 'Never',
-        ];
+        // Build sync status info
+        $syncStatus = $this->buildSyncStatus();
 
-        // Provider sync errors
-        $errorProviders = Capsule::table('mod_aio_ssl_providers')
-            ->where('sync_error_count', '>', 0)
-            ->get()
-            ->toArray();
-
-        $this->renderTemplate('settings.tpl', [
-            'settingsDef'    => $this->settingsDef,
-            'settings'       => $settings,
-            'syncInfo'       => $syncInfo,
-            'errorProviders' => $errorProviders,
+        $this->renderTemplate('settings.php', [
+            'settings'   => $settings,
+            'syncStatus' => $syncStatus,
         ]);
     }
 
@@ -68,92 +43,198 @@ class SettingsController extends BaseController
             case 'save':
                 return $this->saveSettings();
             case 'manual_sync':
-                return $this->triggerManualSync();
-            case 'update_rate':
-                return $this->updateExchangeRate();
+                return $this->manualSync();
+            case 'test_all':
+                return $this->testAllProviders();
             default:
-                return parent::handleAjax($action);
+                return ['success' => false, 'message' => 'Unknown action'];
         }
     }
+
+    // ─── Load ──────────────────────────────────────────────────────
+
+    private function loadAllSettings(): array
+    {
+        $settings = [];
+        try {
+            $rows = Capsule::table('mod_aio_ssl_settings')->get();
+            foreach ($rows as $row) {
+                $settings[$row->setting] = $row->value;
+            }
+        } catch (\Exception $e) {
+            // Return empty
+        }
+        return $settings;
+    }
+
+    // ─── Save ──────────────────────────────────────────────────────
 
     private function saveSettings(): array
     {
-        $updated = 0;
+        $saved = 0;
 
-        foreach ($this->settingsDef as $group => $fields) {
-            foreach ($fields as $key => $def) {
-                if (isset($_POST[$key])) {
-                    $val = trim($_POST[$key]);
+        // Handle checkbox fields: unchecked = not in POST
+        $checkboxKeys = ['sync_enabled', 'notify_issuance', 'notify_expiry', 'notify_sync_errors', 'notify_price_changes'];
 
-                    // Validate
-                    if ($def['type'] === 'bool') {
-                        $val = ($val === '1' || $val === 'on') ? '1' : '0';
-                    } elseif ($def['type'] === 'select' && isset($def['options'])) {
-                        if (!in_array($val, array_map('strval', $def['options']))) {
-                            continue;
-                        }
-                    }
+        foreach ($this->allowedKeys as $key) {
+            $value = $this->input($key);
 
-                    $this->setSetting($key, $val);
-                    $updated++;
-                }
+            // Checkboxes: if not in POST, default to '0'
+            if (in_array($key, $checkboxKeys) && $value === null) {
+                $value = '0';
+            }
+
+            if ($value === null) continue;
+
+            // Validate specific fields
+            switch ($key) {
+                case 'items_per_page':
+                    $value = max(10, min(100, (int)$value));
+                    break;
+                case 'sync_status_interval':
+                    $value = max(1, min(72, (int)$value));
+                    break;
+                case 'sync_product_interval':
+                    $value = max(1, min(168, (int)$value));
+                    break;
+                case 'sync_batch_size':
+                    $value = max(10, min(200, (int)$value));
+                    break;
+                case 'notify_expiry_days':
+                    $value = max(1, min(90, (int)$value));
+                    break;
+                case 'currency_usd_vnd_rate':
+                    $value = max(1, (float)$value);
+                    break;
+                case 'notify_admin_email':
+                    $value = filter_var($value, FILTER_SANITIZE_EMAIL);
+                    break;
+            }
+
+            try {
+                Capsule::table('mod_aio_ssl_settings')->updateOrInsert(
+                    ['setting' => $key],
+                    ['value' => (string)$value]
+                );
+                $saved++;
+            } catch (\Exception $e) {
+                // Skip this key
             }
         }
 
-        ActivityLogger::log('settings_updated', 'settings', null, "{$updated} settings updated");
+        ActivityLogger::log('settings_saved', 'system', '', "Saved {$saved} settings");
 
-        return ['success' => true, 'message' => "{$updated} settings saved successfully."];
+        return [
+            'success' => true,
+            'message' => $this->trans('settings_saved', "Settings saved successfully. ({$saved} values)"),
+        ];
     }
 
-    private function triggerManualSync(): array
+    // ─── Manual Sync ───────────────────────────────────────────────
+
+    private function manualSync(): array
     {
-        $type = $this->input('sync_type', 'all'); // 'products', 'status', 'all'
+        $type = $this->input('type', 'all');
 
         try {
-            if (class_exists('AioSSL\Service\SyncService')) {
-                $syncService = new \AioSSL\Service\SyncService();
-
-                if ($type === 'products' || $type === 'all') {
-                    $syncService->syncProducts();
-                }
-                if ($type === 'status' || $type === 'all') {
-                    $syncService->syncCertificateStatuses();
-                }
+            if (!class_exists('AioSSL\Service\SyncService')) {
+                return ['success' => false, 'message' => 'SyncService not available.'];
             }
 
-            ActivityLogger::log('manual_sync', 'sync', null, "Manual {$type} sync triggered");
+            $syncService = new \AioSSL\Service\SyncService();
+            $results = [];
 
-            return ['success' => true, 'message' => ucfirst($type) . ' sync completed successfully.'];
+            if ($type === 'products' || $type === 'all') {
+                $productResult = $syncService->syncProducts();
+                $results['products'] = $productResult;
+            }
+
+            if ($type === 'status' || $type === 'all') {
+                $batchSize = (int)$this->getSetting('sync_batch_size', 50);
+                $statusResult = $syncService->syncStatuses($batchSize);
+                $results['status'] = $statusResult;
+            }
+
+            // Build summary message
+            $messages = [];
+            if (isset($results['products'])) {
+                $p = $results['products'];
+                $messages[] = "Products: {$p['synced']} synced";
+                if (!empty($p['errors'])) {
+                    $messages[] = count($p['errors']) . ' error(s)';
+                }
+            }
+            if (isset($results['status'])) {
+                $s = $results['status'];
+                $messages[] = "Statuses: {$s['synced']} updated";
+            }
+
+            ActivityLogger::log('manual_sync', 'system', $type, implode('. ', $messages));
+
+            return [
+                'success' => true,
+                'message' => implode('. ', $messages) . '.',
+                'results' => $results,
+            ];
 
         } catch (\Exception $e) {
             return ['success' => false, 'message' => 'Sync failed: ' . $e->getMessage()];
         }
     }
 
-    private function updateExchangeRate(): array
+    // ─── Test All Providers ────────────────────────────────────────
+
+    private function testAllProviders(): array
     {
+        $results = [];
         try {
-            // Fetch from exchangerate-api.com
-            $ch = curl_init('https://api.exchangerate-api.com/v4/latest/USD');
-            curl_setopt_array($ch, [
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_TIMEOUT => 10,
-            ]);
-            $response = curl_exec($ch);
-            curl_close($ch);
-
-            $data = json_decode($response, true);
-            if (isset($data['rates']['VND'])) {
-                $rate = (string)$data['rates']['VND'];
-                $this->setSetting('currency_usd_vnd_rate', $rate);
-                ActivityLogger::log('exchange_rate_updated', 'settings', null, "USD/VND rate updated: {$rate}");
-                return ['success' => true, 'rate' => $rate, 'message' => "Exchange rate updated: 1 USD = {$rate} VND"];
+            $providers = ProviderRegistry::getAllEnabled();
+            foreach ($providers as $slug => $provider) {
+                if (is_object($provider) && method_exists($provider, 'getSlug')) {
+                    $slug = $provider->getSlug();
+                }
+                try {
+                    $results[$slug] = $provider->testConnection();
+                    // Update DB
+                    Capsule::table('mod_aio_ssl_providers')
+                        ->where('slug', $slug)
+                        ->update([
+                            'last_test' => date('Y-m-d H:i:s'),
+                            'test_result' => $results[$slug]['success'] ? 1 : 0,
+                        ]);
+                } catch (\Exception $e) {
+                    $results[$slug] = ['success' => false, 'message' => $e->getMessage()];
+                }
             }
-
-            return ['success' => false, 'message' => 'Could not fetch exchange rate.'];
-
         } catch (\Exception $e) {
-            return ['success' => false, 'message' => 'Error: ' . $e->getMessage()];
+            return ['success' => false, 'message' => $e->getMessage()];
         }
+
+        return ['success' => true, 'results' => $results];
+    }
+
+    // ─── Sync Status Info ──────────────────────────────────────────
+
+    private function buildSyncStatus(): array
+    {
+        $status = ['providers' => []];
+
+        try {
+            $providers = Capsule::table('mod_aio_ssl_providers')
+                ->where('is_enabled', 1)
+                ->get();
+
+            foreach ($providers as $p) {
+                $status['providers'][$p->slug] = [
+                    'success'    => $p->sync_error_count < 3,
+                    'last_sync'  => $p->last_sync ?? 'Never',
+                    'errors'     => $p->sync_error_count,
+                ];
+            }
+        } catch (\Exception $e) {
+            // empty
+        }
+
+        return $status;
     }
 }
