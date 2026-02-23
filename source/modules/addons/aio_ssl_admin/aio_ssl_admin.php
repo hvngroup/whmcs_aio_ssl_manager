@@ -83,56 +83,73 @@ function aio_ssl_admin_activate()
         $pdo->exec("CREATE TABLE IF NOT EXISTS `mod_aio_ssl_products` (
             `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
             `provider_slug` varchar(50) NOT NULL,
-            `product_code` varchar(150) NOT NULL,
-            `product_name` varchar(255) NOT NULL,
-            `vendor` varchar(50) NOT NULL,
-            `validation_type` enum('dv','ov','ev') NOT NULL,
-            `product_type` enum('ssl','wildcard','multi_domain','code_signing','email') NOT NULL DEFAULT 'ssl',
-            `support_wildcard` tinyint(1) NOT NULL DEFAULT 0,
-            `support_san` tinyint(1) NOT NULL DEFAULT 0,
-            `max_domains` int NOT NULL DEFAULT 1,
-            `max_years` int NOT NULL DEFAULT 1,
-            `min_years` int NOT NULL DEFAULT 1,
-            `price_data` text,
-            `extra_data` text,
+            `product_code` varchar(100) NOT NULL,
             `canonical_id` varchar(100) DEFAULT NULL,
-            `last_sync` datetime DEFAULT NULL,
+            `name` varchar(200) NOT NULL,
+            `vendor` varchar(100) DEFAULT NULL,
+            `validation_type` enum('DV','OV','EV') DEFAULT 'DV',
+            `cert_type` enum('single','wildcard','multi-domain','code-signing') DEFAULT 'single',
+            `is_wildcard` tinyint(1) NOT NULL DEFAULT 0,
+            `is_san` tinyint(1) NOT NULL DEFAULT 0,
+            `max_domains` int DEFAULT 1,
+            `max_years` int DEFAULT 1,
+            `price_data` text,
+            `is_active` tinyint(1) NOT NULL DEFAULT 1,
+            `synced_at` datetime DEFAULT NULL,
             `created_at` timestamp DEFAULT CURRENT_TIMESTAMP,
             `updated_at` timestamp DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             PRIMARY KEY (`id`),
             UNIQUE KEY `uk_provider_product` (`provider_slug`, `product_code`),
             KEY `idx_canonical` (`canonical_id`),
             KEY `idx_vendor` (`vendor`),
-            KEY `idx_validation` (`validation_type`)
+            KEY `idx_active` (`is_active`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
 
         // Table: mod_aio_ssl_product_map
         $pdo->exec("CREATE TABLE IF NOT EXISTS `mod_aio_ssl_product_map` (
             `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
             `canonical_id` varchar(100) NOT NULL,
-            `canonical_name` varchar(255) NOT NULL,
-            `vendor` varchar(50) NOT NULL,
-            `validation_type` enum('dv','ov','ev') NOT NULL,
-            `product_type` enum('ssl','wildcard','multi_domain','code_signing','email') NOT NULL DEFAULT 'ssl',
-            `nicsrs_code` varchar(150) DEFAULT NULL,
-            `gogetssl_code` varchar(150) DEFAULT NULL,
-            `thesslstore_code` varchar(150) DEFAULT NULL,
-            `ssl2buy_code` varchar(150) DEFAULT NULL,
+            `canonical_name` varchar(200) NOT NULL,
+            `vendor` varchar(100) NOT NULL,
+            `validation_type` enum('DV','OV','EV') DEFAULT 'DV',
+            `cert_type` enum('single','wildcard','multi-domain','code-signing') DEFAULT 'single',
+            `nicsrs_code` varchar(100) DEFAULT NULL,
+            `gogetssl_code` varchar(100) DEFAULT NULL,
+            `thesslstore_code` varchar(100) DEFAULT NULL,
+            `ssl2buy_code` varchar(100) DEFAULT NULL,
             `is_active` tinyint(1) NOT NULL DEFAULT 1,
+            `created_at` timestamp DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            UNIQUE KEY `uk_canonical` (`canonical_id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
+
+        // Table: mod_aio_ssl_orders
+        $pdo->exec("CREATE TABLE IF NOT EXISTS `mod_aio_ssl_orders` (
+            `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
+            `service_id` int(10) unsigned NOT NULL,
+            `provider_slug` varchar(50) NOT NULL,
+            `remote_id` varchar(100) DEFAULT NULL,
+            `canonical_id` varchar(100) DEFAULT NULL,
+            `product_code` varchar(100) DEFAULT NULL,
+            `domain` varchar(255) DEFAULT NULL,
+            `status` varchar(50) NOT NULL DEFAULT 'Awaiting Configuration',
+            `configdata` longtext,
+            `legacy_table` varchar(100) DEFAULT NULL,
+            `legacy_order_id` int(10) DEFAULT NULL,
             `created_at` timestamp DEFAULT CURRENT_TIMESTAMP,
             `updated_at` timestamp DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             PRIMARY KEY (`id`),
-            UNIQUE KEY `uk_canonical` (`canonical_id`),
-            KEY `idx_vendor` (`vendor`),
-            KEY `idx_active` (`is_active`)
+            KEY `idx_service` (`service_id`),
+            KEY `idx_provider` (`provider_slug`),
+            KEY `idx_remote` (`remote_id`),
+            KEY `idx_status` (`status`),
+            KEY `idx_domain` (`domain`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
 
         // Table: mod_aio_ssl_settings
         $pdo->exec("CREATE TABLE IF NOT EXISTS `mod_aio_ssl_settings` (
             `setting` varchar(100) NOT NULL,
             `value` text,
-            `created_at` timestamp DEFAULT CURRENT_TIMESTAMP,
-            `updated_at` timestamp DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             PRIMARY KEY (`setting`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
 
@@ -154,8 +171,8 @@ function aio_ssl_admin_activate()
 
         // Seed default settings
         $defaults = [
-            ['sync_status_interval', '6'],       // hours
-            ['sync_product_interval', '24'],      // hours
+            ['sync_status_interval', '6'],
+            ['sync_product_interval', '24'],
             ['sync_batch_size', '50'],
             ['sync_enabled', '1'],
             ['notify_issuance', '1'],
@@ -164,7 +181,7 @@ function aio_ssl_admin_activate()
             ['notify_sync_errors', '1'],
             ['notify_price_changes', '1'],
             ['notify_admin_email', ''],
-            ['currency_display', 'usd'],          // usd | vnd | both
+            ['currency_display', 'usd'],
             ['currency_usd_vnd_rate', '25000'],
             ['items_per_page', '25'],
             ['date_format', 'Y-m-d'],
@@ -191,8 +208,6 @@ function aio_ssl_admin_activate()
  */
 function aio_ssl_admin_deactivate()
 {
-    // We do NOT drop tables on deactivation to preserve data.
-    // Tables are only dropped via manual cleanup if needed.
     return ['status' => 'success', 'description' => 'AIO SSL Manager deactivated. Database tables preserved.'];
 }
 
@@ -205,11 +220,7 @@ function aio_ssl_admin_deactivate()
 function aio_ssl_admin_upgrade($vars)
 {
     $currentVersion = $vars['version'];
-
     // Future migrations go here
-    // if (version_compare($currentVersion, '1.1.0', '<')) {
-    //     // Migration for 1.1.0
-    // }
 }
 
 /**
@@ -259,26 +270,71 @@ function aio_ssl_admin_output($vars)
         $controller = new $controllerClass($vars, $lang);
 
         if ($isAjax) {
-            // AJAX: dispatch action and return JSON
+            // AJAX: clean output buffer, dispatch action and return JSON
+            while (ob_get_level()) {
+                ob_end_clean();
+            }
             header('Content-Type: application/json');
             $response = $controller->handleAjax($action);
             echo json_encode($response);
             return;
         }
 
-        // Render page navigation + controller output
+        _aio_ssl_render_assets();
+
+        echo '<div class="aio-wrapper">';
+
         _aio_ssl_render_navigation($page);
+
+        // Render page content inside wrapper
+        echo '<div class="aio-content">';
         $controller->render($action);
+        echo '</div>';
+
+        // Footer
+        _aio_ssl_render_footer();
+
+        echo '</div>'; // .aio-wrapper
 
     } catch (\Exception $e) {
-        echo '<div class="alert alert-danger">';
+        echo '<div class="aio-alert aio-alert-danger">';
+        echo '<i class="fas fa-exclamation-circle"></i> ';
         echo '<strong>Error:</strong> ' . htmlspecialchars($e->getMessage());
         echo '</div>';
     }
 }
 
 /**
- * Render admin navigation tabs
+ * Render CSS & JS assets
+ *
+ * WHMCS admin addon _output() renders inside the admin page body,
+ * so we output <link> and <script> tags inline. The browser handles
+ * them correctly even in the body context.
+ *
+ * Asset path: ../modules/addons/aio_ssl_admin/assets/
+ *
+ * @return void
+ */
+function _aio_ssl_render_assets()
+{
+    $assetBase = '../modules/addons/aio_ssl_admin/assets';
+    $version = AIO_SSL_VERSION;
+
+    // CSS
+    echo '<link rel="stylesheet" type="text/css" href="' . $assetBase . '/css/admin.css?v=' . $version . '" />' . "\n";
+
+    // JS (deferred to ensure DOM is ready; jQuery already loaded by WHMCS)
+    echo '<script type="text/javascript" src="' . $assetBase . '/js/admin.js?v=' . $version . '"></script>' . "\n";
+
+    // Pass module link to JS namespace
+    echo '<script type="text/javascript">window.aioModuleLink = "addonmodules.php?module=aio_ssl_admin";</script>' . "\n";
+}
+
+/**
+ * Render admin navigation — Ant Design-inspired tabs
+ *
+ * Uses custom .aio-header and .aio-nav-tabs classes from admin.css
+ * instead of default WHMCS Bootstrap nav-tabs.
  *
  * @param string $activePage
  * @return void
@@ -298,19 +354,55 @@ function _aio_ssl_render_navigation($activePage)
 
     $moduleLink = 'addonmodules.php?module=aio_ssl_admin';
 
-    echo '<div class="aio-ssl-header" style="margin-bottom:20px;">';
-    echo '<h2><i class="fas fa-shield-alt" style="color:#1890ff;"></i> HVN — AIO SSL Manager <small>v' . AIO_SSL_VERSION . '</small></h2>';
+    // ── Header ──
+    echo '<div class="aio-header">';
+    echo '  <h2>';
+    echo '    <i class="fas fa-shield-alt" style="color:var(--aio-primary);"></i> ';
+    echo '    <span class="aio-brand">HVN</span> — AIO SSL Manager ';
+    echo '    <small>v' . AIO_SSL_VERSION . '</small>';
+    echo '  </h2>';
+
+    // Header right: active providers count
+    echo '  <div class="aio-header-right">';
+    try {
+        $activeProviders = \WHMCS\Database\Capsule::table('mod_aio_ssl_providers')
+            ->where('is_enabled', 1)
+            ->get();
+        foreach ($activeProviders as $p) {
+            $dotClass = $p->test_result ? 'dot' : 'dot offline';
+            echo '<span class="aio-provider-dot">';
+            echo '<span class="' . $dotClass . '"></span> ' . htmlspecialchars($p->name);
+            echo '</span>';
+        }
+    } catch (\Exception $e) {
+        // Silently ignore if table doesn't exist yet
+    }
+    echo '  </div>';
     echo '</div>';
 
-    echo '<ul class="nav nav-tabs" role="tablist" style="margin-bottom:20px;">';
+    // ── Navigation Tabs (Ant Design style) ──
+    echo '<div class="aio-nav-tabs">';
     foreach ($pages as $key => $tab) {
-        $active = ($key === $activePage) ? ' class="active"' : '';
+        $activeClass = ($key === $activePage) ? ' active' : '';
         $url = $moduleLink . '&page=' . $key;
-        echo '<li' . $active . '>';
-        echo '<a href="' . $url . '"><i class="fas ' . $tab['icon'] . '"></i> ' . $tab['label'] . '</a>';
-        echo '</li>';
+        echo '<a href="' . $url . '" class="aio-nav-tab' . $activeClass . '">';
+        echo '<i class="fas ' . $tab['icon'] . '"></i> ' . $tab['label'];
+        echo '</a>';
     }
-    echo '</ul>';
+    echo '</div>';
+}
+
+/**
+ * Render module footer
+ *
+ * @return void
+ */
+function _aio_ssl_render_footer()
+{
+    echo '<div class="aio-footer">';
+    echo '&copy; ' . date('Y') . ' <a href="https://hvn.vn" target="_blank">HVN GROUP</a>';
+    echo ' &mdash; AIO SSL Manager v' . AIO_SSL_VERSION;
+    echo '</div>';
 }
 
 /**
