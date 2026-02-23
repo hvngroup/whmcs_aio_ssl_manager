@@ -13,6 +13,8 @@
 namespace AioSSL\Controller;
 
 use WHMCS\Database\Capsule;
+use AioSSL\Helper\ViewHelper;
+use AioSSL\Helper\CurrencyHelper;
 
 abstract class BaseController
 {
@@ -37,6 +39,11 @@ abstract class BaseController
         $this->vars = $vars;
         $this->lang = $lang;
         $this->moduleLink = 'addonmodules.php?module=aio_ssl_admin';
+
+        // Initialize helpers
+        $dateFormat = $this->getSetting('date_format', 'Y-m-d');
+        $this->viewHelper = new ViewHelper($dateFormat);
+        $this->currencyHelper = new CurrencyHelper();
 
         // Load items per page from settings
         $ipp = $this->getSetting('items_per_page');
@@ -70,13 +77,12 @@ abstract class BaseController
      * Render a PHP template via extract() + include
      *
      * CONSTRAINT C1: WHMCS admin addon does NOT support Smarty.
-     * All templates must be plain .php files using <?= ?> for output.
+     * All templates MUST be .php files using <?= ?> for output.
      *
      * @param string $template Template filename (e.g. 'dashboard.php')
      * @param array  $data     Variables to pass to template
      * @return void
      */
-
     protected function renderTemplate(string $template, array $data = []): void
     {
         $templatePath = AIO_SSL_TEMPLATE_PATH . '/' . $template;
@@ -86,11 +92,13 @@ abstract class BaseController
             return;
         }
 
-        // Inject common variables
+        // Inject common variables available to ALL templates
         $data['moduleLink'] = $this->moduleLink;
         $data['moduleVersion'] = AIO_SSL_VERSION;
         $data['lang'] = $this->lang;
         $data['csrfToken'] = generate_token('plain');
+        $data['helper'] = $this->viewHelper;           // ViewHelper instance
+        $data['currency'] = $this->currencyHelper;      // CurrencyHelper instance
 
         // Extract variables for template
         extract($data, EXTR_SKIP);

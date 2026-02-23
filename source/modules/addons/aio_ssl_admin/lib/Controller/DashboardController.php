@@ -14,7 +14,7 @@ class DashboardController extends BaseController
         $expiringCerts = $this->getExpiringCertificates();
         $recentOrders = $this->getRecentOrders();
 
-        $this->renderTemplate('dashboard.tpl', [
+        $this->renderTemplate('dashboard.php', [
             'stats'          => $stats,
             'providers'      => $providers,
             'expiringCerts'  => $expiringCerts,
