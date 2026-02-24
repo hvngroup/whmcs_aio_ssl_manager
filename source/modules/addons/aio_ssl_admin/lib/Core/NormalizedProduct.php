@@ -84,4 +84,27 @@ class NormalizedProduct
             'last_sync'        => date('Y-m-d H:i:s'),
         ];
     }
+
+    /**
+     * Convert to plain array
+     *
+     * @return array
+     */
+    public function toArray(): array
+    {
+        return [
+            'product_code'     => $this->productCode,
+            'product_name'     => $this->productName,
+            'vendor'           => $this->vendor,
+            'validation_type'  => $this->validationType,
+            'product_type'     => $this->productType,
+            'support_wildcard' => (int)$this->supportWildcard,
+            'support_san'      => (int)$this->supportSan,
+            'max_domains'      => $this->maxDomains,
+            'max_years'        => $this->maxYears,
+            'min_years'        => $this->minYears,
+            'price_data'       => $this->priceData,
+            'extra_data'       => $this->extraData,
+        ];
+    }
 }

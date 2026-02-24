@@ -66,20 +66,51 @@ class TheSSLStoreProvider extends AbstractProvider
     {
         try {
             $response = $this->apiCall('/product/query', [
-                'ProductType' => 0,
+                'ProductType'    => 0,
                 'NeedSortedList' => true,
             ]);
 
-            if ($response['code'] === 200 && isset($response['decoded']['AuthResponse'])) {
-                $auth = $response['decoded']['AuthResponse'];
-                if (isset($auth['isError']) && $auth['isError']) {
-                    return ['success' => false, 'message' => $auth['Message'][0] ?? 'Auth error', 'balance' => null];
-                }
-                return ['success' => true, 'message' => 'TheSSLStore connected successfully.', 'balance' => null];
+            $decoded  = $response['decoded'];
+            $httpCode = $response['code'];
+
+            if ($decoded === null) {
+                return ['success' => false, 'message' => "Invalid JSON (HTTP {$httpCode}).", 'balance' => null];
             }
-            return ['success' => false, 'message' => 'Unexpected response.', 'balance' => null];
+
+            // API returns flat array: [{product}, {product}, ...]
+            // If auth fails, first element contains AuthResponse.isError
+            if (is_array($decoded) && isset($decoded[0])) {
+                $first = is_array($decoded[0]) ? $decoded[0] : (array)$decoded[0];
+
+                // Check auth error inside first element
+                $auth = $first['AuthResponse'] ?? null;
+                if ($auth && !empty($auth['isError'])) {
+                    $msg = is_array($auth['Message'] ?? null)
+                        ? implode('; ', $auth['Message'])
+                        : ($auth['Message'] ?? 'Auth failed');
+                    return ['success' => false, 'message' => $msg, 'balance' => null];
+                }
+
+                return [
+                    'success' => true,
+                    'message' => 'TheSSLStore connected successfully. ' . count($decoded) . ' products available.',
+                    'balance' => null,
+                ];
+            }
+
+            // Single object response (e.g. auth error without array wrapper)
+            $auth = $decoded['AuthResponse'] ?? $decoded;
+            if (!empty($auth['isError'])) {
+                $msg = is_array($auth['Message'] ?? null)
+                    ? implode('; ', $auth['Message'])
+                    : ($auth['Message'] ?? 'Auth failed');
+                return ['success' => false, 'message' => $msg, 'balance' => null];
+            }
+
+            return ['success' => false, 'message' => 'Unexpected response (HTTP ' . $httpCode . ').', 'balance' => null];
+
         } catch (\Exception $e) {
-            return ['success' => false, 'message' => $e->getMessage(), 'balance' => null];
+            return ['success' => false, 'message' => 'Connection failed: ' . $e->getMessage(), 'balance' => null];
         }
     }
 
@@ -88,16 +119,23 @@ class TheSSLStoreProvider extends AbstractProvider
     public function fetchProducts(): array
     {
         $response = $this->apiCall('/product/query', [
-            'ProductType' => 0,
+            'ProductType'    => 0,
             'NeedSortedList' => true,
         ]);
 
-        if ($response['code'] !== 200 || !isset($response['decoded']['ProductList'])) {
-            throw new \RuntimeException('TheSSLStore: Failed to fetch products');
+        $decoded = $response['decoded'];
+
+        if ($response['code'] !== 200 || !is_array($decoded) || empty($decoded)) {
+            throw new \RuntimeException('TheSSLStore: Failed to fetch products (HTTP ' . $response['code'] . ')');
         }
 
+        // API returns flat array: [{product}, {product}, ...]
         $products = [];
-        foreach ($response['decoded']['ProductList'] as $item) {
+        foreach ($decoded as $item) {
+            $item = is_array($item) ? $item : (array)$item;
+            if (empty($item['ProductCode'])) {
+                continue;
+            }
             $products[] = $this->normalizeProduct($item);
         }
 

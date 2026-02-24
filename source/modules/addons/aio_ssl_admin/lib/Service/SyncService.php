@@ -57,31 +57,35 @@ class SyncService
 
                 try {
                     $products = $provider->fetchProducts();
+
+                    ActivityLogger::log('product_sync', 'provider', $slug, "Fetched " . count($products) . " products");
+
                     $upserted = $this->upsertProducts($slug, $products);
 
                     // Update provider last_sync
                     Capsule::table('mod_aio_ssl_providers')
                         ->where('slug', $slug)
                         ->update([
-                            'last_sync' => date('Y-m-d H:i:s'),
+                            'last_sync'        => date('Y-m-d H:i:s'),
                             'sync_error_count' => 0,
                         ]);
 
                     $results['details'][$slug] = [
-                        'fetched'  => count($products),
-                        'upserted' => $upserted['upserted'],
-                        'updated'  => $upserted['updated'],
+                        'fetched'       => count($products),
+                        'upserted'      => $upserted['upserted'],
+                        'updated'       => $upserted['updated'],
                         'price_changes' => $upserted['price_changes'],
                     ];
                     $results['synced'] += $upserted['upserted'];
 
                     ActivityLogger::log('product_sync', 'provider', $slug,
-                        "Synced {$upserted['upserted']} products ({$upserted['updated']} updated)");
+                        "Synced {$upserted['upserted']} products ({$upserted['updated']} updated, {$upserted['price_changes']} price changes)");
 
-                } catch (\Exception $e) {
+                } catch (\Throwable $e) {  // ← Catches BOTH \Exception AND \Error
                     $results['errors'][] = "{$slug}: " . $e->getMessage();
                     $this->incrementErrorCount($slug);
-                    ActivityLogger::log('sync_error', 'provider', $slug, $e->getMessage());
+                    ActivityLogger::log('sync_error', 'provider', $slug,
+                        get_class($e) . ': ' . $e->getMessage());
                 }
             }
         } finally {
@@ -93,65 +97,106 @@ class SyncService
 
     /**
      * Upsert products into mod_aio_ssl_products
+     *
+     * @param string $slug     Provider slug
+     * @param array  $products NormalizedProduct[] or array[]
+     * @return array ['upserted' => int, 'updated' => int, 'price_changes' => int]
      */
     private function upsertProducts(string $slug, array $products): array
     {
         $stats = ['upserted' => 0, 'updated' => 0, 'price_changes' => 0];
 
         foreach ($products as $p) {
-            if (!is_array($p) && !($p instanceof \AioSSL\Core\NormalizedProduct)) {
-                continue;
-            }
-
-            $data = is_array($p) ? $p : $p->toArray();
-            $code = $data['code'] ?? $data['product_code'] ?? '';
-            if (empty($code)) continue;
-
-            // Normalize price data to JSON
-            $priceJson = is_string($data['price_data'] ?? null)
-                ? $data['price_data']
-                : json_encode($data['price_data'] ?? []);
-
-            $existing = Capsule::table('mod_aio_ssl_products')
-                ->where('provider_slug', $slug)
-                ->where('product_code', $code)
-                ->first();
-
-            $row = [
-                'provider_slug'   => $slug,
-                'product_code'    => $code,
-                'product_name'    => $data['name'] ?? $data['product_name'] ?? '',
-                'vendor'          => $data['vendor'] ?? '',
-                'validation_type' => strtolower($data['validation_type'] ?? 'dv'),
-                'product_type'    => strtolower($data['type'] ?? $data['product_type'] ?? 'ssl'),
-                'support_wildcard'=> (int)($data['wildcard'] ?? $data['support_wildcard'] ?? 0),
-                'support_san'     => (int)($data['san'] ?? $data['support_san'] ?? 0),
-                'max_domains'     => (int)($data['max_domains'] ?? 1),
-                'max_years'       => (int)($data['max_years'] ?? 1),
-                'min_years'       => (int)($data['min_years'] ?? 1),
-                'price_data'      => $priceJson,
-                'last_sync'       => date('Y-m-d H:i:s'),
-                'updated_at'      => date('Y-m-d H:i:s'),
-            ];
-
-            if ($existing) {
-                // Detect price changes
-                if ($existing->price_data !== $priceJson) {
-                    $stats['price_changes']++;
-                    $this->logPriceChange($slug, $code, $existing->price_data, $priceJson);
+            try {
+                // Convert NormalizedProduct to DB row directly
+                if ($p instanceof \AioSSL\Core\NormalizedProduct) {
+                    $row = $p->toDbRow($slug);
+                } elseif (is_array($p)) {
+                    // Fallback for raw arrays — normalize keys
+                    $row = $this->normalizeRowFromArray($slug, $p);
+                } else {
+                    continue;
                 }
-                Capsule::table('mod_aio_ssl_products')
-                    ->where('id', $existing->id)
-                    ->update($row);
-                $stats['updated']++;
-            } else {
-                $row['created_at'] = date('Y-m-d H:i:s');
-                Capsule::table('mod_aio_ssl_products')->insert($row);
+
+                $code = $row['product_code'] ?? '';
+                if (empty($code)) continue;
+
+                // Check existing record
+                $existing = Capsule::table('mod_aio_ssl_products')
+                    ->where('provider_slug', $slug)
+                    ->where('product_code', $code)
+                    ->first();
+
+                if ($existing) {
+                    // Detect price changes
+                    $oldPrice = $existing->price_data ?? '{}';
+                    $newPrice = $row['price_data'] ?? '{}';
+                    if ($oldPrice !== $newPrice) {
+                        $stats['price_changes']++;
+                        $row['previous_price_data'] = $oldPrice;
+                    }
+
+                    // Preserve canonical_id mapping
+                    unset($row['canonical_id']);
+
+                    // Update existing
+                    $row['updated_at'] = date('Y-m-d H:i:s');
+                    Capsule::table('mod_aio_ssl_products')
+                        ->where('id', $existing->id)
+                        ->update($row);
+
+                    $stats['updated']++;
+                } else {
+                    // Insert new
+                    $row['created_at'] = date('Y-m-d H:i:s');
+                    $row['updated_at'] = date('Y-m-d H:i:s');
+                    Capsule::table('mod_aio_ssl_products')->insert($row);
+                    $stats['upserted']++;
+                }
+
+            } catch (\Throwable $e) {
+                ActivityLogger::log('sync_warning', 'provider', $slug,
+                    "upsert failed for product: " . $e->getMessage());
             }
-            $stats['upserted']++;
         }
 
+        // Count upserted as total (inserted + updated)
+        $stats['upserted'] = $stats['upserted'] + $stats['updated'];
+
         return $stats;
+    }
+
+    /**
+     * Normalize a raw array to DB row format (fallback)
+     *
+     * @param string $slug
+     * @param array  $data
+     * @return array
+     */
+    private function normalizeRowFromArray(string $slug, array $data): array
+    {
+        $priceData = $data['price_data'] ?? [];
+        $priceJson = is_string($priceData) ? $priceData : json_encode($priceData);
+
+        $extraData = $data['extra_data'] ?? [];
+        $extraJson = is_string($extraData) ? $extraData : json_encode($extraData);
+
+        return [
+            'provider_slug'    => $slug,
+            'product_code'     => $data['product_code'] ?? $data['code'] ?? '',
+            'product_name'     => $data['product_name'] ?? $data['name'] ?? '',
+            'vendor'           => $data['vendor'] ?? '',
+            'validation_type'  => strtolower($data['validation_type'] ?? 'dv'),
+            'product_type'     => strtolower($data['product_type'] ?? $data['type'] ?? 'ssl'),
+            'support_wildcard' => (int)($data['support_wildcard'] ?? $data['wildcard'] ?? 0),
+            'support_san'      => (int)($data['support_san'] ?? $data['san'] ?? 0),
+            'max_domains'      => (int)($data['max_domains'] ?? 1),
+            'max_years'        => (int)($data['max_years'] ?? 1),
+            'min_years'        => (int)($data['min_years'] ?? 1),
+            'price_data'       => $priceJson,
+            'extra_data'       => $extraJson,
+            'last_sync'        => date('Y-m-d H:i:s'),
+        ];
     }
 
     /**
@@ -247,6 +292,16 @@ class SyncService
             $this->syncStatuses($batchSize);
             $this->setLastSync('status', $now);
         }
+
+        // Exchange rate auto-update
+        try {
+            $currencyHelper = new \AioSSL\Helper\CurrencyHelper();
+            if ($currencyHelper->shouldAutoUpdate()) {
+                $currencyHelper->updateRateFromApi();
+            }
+        } catch (\Throwable $e) {
+            // Silent — rate update is non-critical
+        }        
     }
 
     // ─── Lock Management ───────────────────────────────────────────

@@ -270,20 +270,30 @@ function aio_ssl_admin_output($vars)
         $controller = new $controllerClass($vars, $lang);
 
         if ($isAjax) {
-            // AJAX: clean output buffer, dispatch action and return JSON
+            // AJAX: clean all output buffers, send pure JSON, hard exit
             while (ob_get_level()) {
                 ob_end_clean();
             }
-            header('Content-Type: application/json');
-            $response = $controller->handleAjax($action);
-            echo json_encode($response);
-            return;
-        }
+            header('Content-Type: application/json; charset=utf-8');
+            header('Cache-Control: no-cache, must-revalidate');
 
+            try {
+                $response = $controller->handleAjax($action);
+                echo json_encode($response);
+            } catch (\Exception $e) {
+                echo json_encode([
+                    'success' => false,
+                    'message' => 'Server error: ' . $e->getMessage(),
+                ]);
+            }
+            exit;  // Hard stop — prevents WHMCS from appending admin template
+        }    
+        
         _aio_ssl_render_assets();
 
         echo '<div class="aio-wrapper">';
 
+        // Render header + navigation
         _aio_ssl_render_navigation($page);
 
         // Render page content inside wrapper
@@ -380,16 +390,16 @@ function _aio_ssl_render_navigation($activePage)
     echo '  </div>';
     echo '</div>';
 
-    // ── Navigation Tabs (Ant Design style) ──
-    echo '<div class="aio-nav-tabs">';
+    // ── Navigation Tabs (Bootstrap structure, Ant Design styled via .aio-wrapper) ──
+    echo '<ul class="nav nav-tabs" role="tablist">';
     foreach ($pages as $key => $tab) {
-        $activeClass = ($key === $activePage) ? ' active' : '';
+        $active = ($key === $activePage) ? ' class="active"' : '';
         $url = $moduleLink . '&page=' . $key;
-        echo '<a href="' . $url . '" class="aio-nav-tab' . $activeClass . '">';
-        echo '<i class="fas ' . $tab['icon'] . '"></i> ' . $tab['label'];
-        echo '</a>';
+        echo '<li' . $active . '>';
+        echo '<a href="' . $url . '"><i class="fas ' . $tab['icon'] . '"></i> ' . $tab['label'] . '</a>';
+        echo '</li>';
     }
-    echo '</div>';
+    echo '</ul>';
 }
 
 /**

@@ -240,8 +240,12 @@ $tabs = [
 <?php elseif ($tab === 'currency'): ?>
 <!-- ══════════ CURRENCY TAB ══════════ -->
 <div class="aio-grid-2-equal">
+
+    <!-- Left: Currency Display -->
     <div class="aio-card">
-        <div class="aio-card-header"><span><i class="fas fa-dollar-sign"></i> <?= $lang['currency_config'] ?? 'Currency Configuration' ?></span></div>
+        <div class="aio-card-header">
+            <span><i class="fas fa-dollar-sign"></i> <?= $lang['currency_config'] ?? 'Currency Configuration' ?></span>
+        </div>
         <div class="aio-card-body">
             <div class="aio-form-group">
                 <label><?= $lang['currency_display'] ?? 'Display Currency' ?></label>
@@ -255,26 +259,112 @@ $tabs = [
                 <label><?= $lang['exchange_rate'] ?? 'USD → VND Exchange Rate' ?></label>
                 <div style="display:flex;align-items:center;gap:8px;">
                     <span style="font-weight:600;">1 USD =</span>
-                    <input type="number" name="currency_usd_vnd_rate" class="aio-form-control" style="width:140px"
-                           value="<?= htmlspecialchars($s('currency_usd_vnd_rate', '25000')) ?>" min="1" step="100" />
+                    <input type="number" name="currency_usd_vnd_rate" id="currency_usd_vnd_rate"
+                           class="aio-form-control" style="width:160px"
+                           value="<?= htmlspecialchars($s('currency_usd_vnd_rate', '25000')) ?>"
+                           min="1" step="100" />
                     <span style="font-weight:600;">VND</span>
                 </div>
-                <div class="aio-form-hint"><?= $lang['rate_hint'] ?? 'Used for price display. Updated automatically if API integration is enabled.' ?></div>
+                <div class="aio-form-hint">
+                    Updated automatically if API integration is enabled, or enter manually.
+                </div>
             </div>
+
+            <!-- Rate History Info -->
+            <?php
+            $lastUpdate = $s('exchangerate_last_update', '');
+            $lastRate = $s('exchangerate_last_rate', '');
+            $lastError = $s('exchangerate_last_error', '');
+            $errorCount = (int)$s('exchangerate_error_count', '0');
+            ?>
+            <?php if ($lastUpdate): ?>
+            <div class="aio-alert aio-alert-success" style="margin-top:12px;font-size:12px;">
+                <i class="fas fa-check-circle"></i>
+                <div>
+                    <strong>Last API Update:</strong> <?= htmlspecialchars($lastUpdate) ?><br>
+                    <strong>Rate:</strong> 1 USD = <?= number_format((float)$lastRate, 2) ?> VND
+                </div>
+            </div>
+            <?php endif; ?>
+            <?php if ($errorCount > 0 && $lastError): ?>
+            <div class="aio-alert aio-alert-warning" style="margin-top:8px;font-size:12px;">
+                <i class="fas fa-exclamation-triangle"></i>
+                <div>
+                    <strong>Last Error:</strong> <?= htmlspecialchars($lastError) ?>
+                    (<?= $errorCount ?> consecutive error<?= $errorCount > 1 ? 's' : '' ?>)
+                </div>
+            </div>
+            <?php endif; ?>
         </div>
     </div>
 
+    <!-- Right: API Auto-Update -->
     <div class="aio-card">
-        <div class="aio-card-header"><span><i class="fas fa-exchange-alt"></i> <?= $lang['auto_rate'] ?? 'Automatic Rate Update' ?></span></div>
+        <div class="aio-card-header">
+            <span><i class="fas fa-exchange-alt"></i> <?= $lang['auto_rate'] ?? 'Automatic Rate Update' ?></span>
+        </div>
         <div class="aio-card-body">
-            <div class="aio-alert aio-alert-info">
+            <div class="aio-alert aio-alert-info" style="font-size:12px;margin-bottom:16px;">
                 <i class="fas fa-info-circle"></i>
                 <div>
-                    Exchange rate can be updated automatically via
-                    <a href="https://exchangerate-api.com" target="_blank" class="aio-link">exchangerate-api.com</a>.
-                    This is a planned feature for a future update.
+                    <strong>API Source:</strong>
+                    <a href="https://www.exchangerate-api.com" target="_blank" class="aio-link">exchangerate-api.com</a><br>
+                    <span style="color:var(--aio-text-secondary);">
+                        Free tier: 1,500 requests/month — sufficient for hourly updates.
+                        <a href="https://app.exchangerate-api.com/sign-up" target="_blank" class="aio-link">Get free API key →</a>
+                    </span>
                 </div>
             </div>
+
+            <!-- API Key -->
+            <div class="aio-form-group">
+                <label>API Key <span class="required">*</span></label>
+                <div style="display:flex;gap:8px;">
+                    <input type="text" name="exchangerate_api_key" id="exchangerate_api_key"
+                           class="aio-form-control" style="flex:1"
+                           value="<?= htmlspecialchars($s('exchangerate_api_key', '')) ?>"
+                           placeholder="Enter your exchangerate-api.com API key" />
+                    <button type="button" class="aio-btn" onclick="AioSSL.testRateApi()" title="Test API Key">
+                        <i class="fas fa-vial"></i> Test
+                    </button>
+                </div>
+            </div>
+
+            <!-- Enable Auto-Update -->
+            <div class="aio-form-group">
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                    <input type="checkbox" name="exchangerate_auto_enabled" value="1"
+                           <?= $s('exchangerate_auto_enabled') === '1' ? 'checked' : '' ?> />
+                    Enable automatic exchange rate updates
+                </label>
+            </div>
+
+            <!-- Update Interval -->
+            <div class="aio-form-group">
+                <label>Update Frequency</label>
+                <select name="exchangerate_update_interval" class="aio-form-control">
+                    <?php
+                    $intervals = [6 => 'Every 6 hours', 12 => 'Every 12 hours', 24 => 'Daily', 48 => 'Every 2 days', 168 => 'Weekly'];
+                    $current = $s('exchangerate_update_interval', '24');
+                    foreach ($intervals as $val => $label):
+                    ?>
+                    <option value="<?= $val ?>" <?= $current == $val ? 'selected' : '' ?>><?= $label ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <div class="aio-form-hint">
+                    Free plan: ~2 requests/hour max (1,500/month). Daily update recommended.
+                </div>
+            </div>
+
+            <!-- Fetch Now -->
+            <div style="display:flex;gap:8px;margin-top:16px;">
+                <button type="button" class="aio-btn aio-btn-primary" onclick="AioSSL.fetchExchangeRate()" style="flex:1">
+                    <i class="fas fa-sync-alt"></i> Fetch Rate Now
+                </button>
+            </div>
+
+            <!-- Test Result -->
+            <div id="rate-test-result" style="display:none;margin-top:12px;"></div>
         </div>
     </div>
 </div>

@@ -22,6 +22,7 @@ class SettingsController extends BaseController
         'notify_issuance', 'notify_expiry', 'notify_expiry_days',
         'notify_sync_errors', 'notify_price_changes', 'notify_admin_email',
         'currency_display', 'currency_usd_vnd_rate',
+        'exchangerate_api_key', 'exchangerate_auto_enabled', 'exchangerate_update_interval',    
     ];
 
     public function render(string $action = ''): void
@@ -46,6 +47,10 @@ class SettingsController extends BaseController
                 return $this->manualSync();
             case 'test_all':
                 return $this->testAllProviders();
+            case 'fetch_rate':
+                return $this->fetchExchangeRate();
+            case 'test_rate_api':
+                return $this->testRateApi();
             default:
                 return ['success' => false, 'message' => 'Unknown action'];
         }
@@ -74,7 +79,7 @@ class SettingsController extends BaseController
         $saved = 0;
 
         // Handle checkbox fields: unchecked = not in POST
-        $checkboxKeys = ['sync_enabled', 'notify_issuance', 'notify_expiry', 'notify_sync_errors', 'notify_price_changes'];
+        $checkboxKeys = ['sync_enabled', 'notify_issuance', 'notify_expiry', 'notify_sync_errors', 'notify_price_changes', 'exchangerate_auto_enabled',];
 
         foreach ($this->allowedKeys as $key) {
             $value = $this->input($key);
@@ -126,7 +131,7 @@ class SettingsController extends BaseController
 
         return [
             'success' => true,
-            'message' => $this->trans('settings_saved', "Settings saved successfully. ({$saved} values)"),
+            'message' => $this->t('settings_saved', "Settings saved successfully. ({$saved} values)"),
         ];
     }
 
@@ -236,5 +241,63 @@ class SettingsController extends BaseController
         }
 
         return $status;
+    }
+    
+    /**
+     * Fetch exchange rate from API and save
+     */
+    private function fetchExchangeRate(): array
+    {
+        try {
+            $helper = new \AioSSL\Helper\CurrencyHelper();
+            $result = $helper->updateRateFromApi();
+
+            if ($result['success']) {
+                return [
+                    'success' => true,
+                    'message' => $result['message'],
+                    'rate'    => $result['rate'],
+                    'old_rate' => $result['old_rate'] ?? null,
+                    'change'  => $result['change'] ?? 0,
+                    'updated_at' => date('Y-m-d H:i:s'),
+                ];
+            }
+
+            return $result;
+        } catch (\Throwable $e) {
+            return ['success' => false, 'message' => 'Failed: ' . $e->getMessage()];
+        }
+    }
+
+    /**
+     * Test exchange rate API key without saving
+     */
+    private function testRateApi(): array
+    {
+        $apiKey = $this->rawInput('exchangerate_api_key', '');
+        if (empty($apiKey)) {
+            $apiKey = $this->getSetting('exchangerate_api_key', '');
+        }
+
+        if (empty($apiKey)) {
+            return ['success' => false, 'message' => 'Please enter an API key first.'];
+        }
+
+        try {
+            $helper = new \AioSSL\Helper\CurrencyHelper();
+            $result = $helper->fetchRateFromApi($apiKey);
+
+            if ($result['success']) {
+                return [
+                    'success' => true,
+                    'message' => 'API key valid! ' . $result['message'],
+                    'rate'    => $result['rate'],
+                ];
+            }
+
+            return $result;
+        } catch (\Throwable $e) {
+            return ['success' => false, 'message' => $e->getMessage()];
+        }
     }
 }

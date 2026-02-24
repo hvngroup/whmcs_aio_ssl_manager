@@ -411,4 +411,67 @@
         });
     });
 
+    /**
+     * Fetch exchange rate from API and update
+     */
+    AioSSL.fetchExchangeRate = function() {
+        AioSSL.ajax({
+            page: 'settings',
+            action: 'fetch_rate',
+            loadingMsg: 'Fetching exchange rate...',
+            onSuccess: function(resp) {
+                // Update the rate input field
+                if (resp.rate) {
+                    $('#currency_usd_vnd_rate').val(Math.round(resp.rate));
+                }
+                // Show result
+                var html = '<div class="aio-alert aio-alert-success" style="font-size:12px;">'
+                    + '<i class="fas fa-check-circle"></i> ' + resp.message;
+                if (resp.change && resp.change !== 0) {
+                    html += '<br><small>Previous: ' + (resp.old_rate ? Number(resp.old_rate).toLocaleString() : 'N/A')
+                        + ' VND | Change: ' + (resp.change > 0 ? '+' : '') + resp.change + '%</small>';
+                }
+                html += '</div>';
+                $('#rate-test-result').html(html).show();
+            },
+            onError: function(resp) {
+                $('#rate-test-result').html(
+                    '<div class="aio-alert aio-alert-danger" style="font-size:12px;">'
+                    + '<i class="fas fa-times-circle"></i> ' + (resp.message || 'Failed to fetch rate.')
+                    + '</div>'
+                ).show();
+            }
+        });
+    };
+
+    /**
+     * Test exchange rate API key
+     */
+    AioSSL.testRateApi = function() {
+        var apiKey = $('#exchangerate_api_key').val();
+        if (!apiKey) {
+            AioSSL.toast('Please enter an API key first.', 'warning');
+            return;
+        }
+        AioSSL.ajax({
+            page: 'settings',
+            action: 'test_rate_api',
+            data: { exchangerate_api_key: apiKey },
+            loadingMsg: 'Testing API key...',
+            onSuccess: function(resp) {
+                $('#rate-test-result').html(
+                    '<div class="aio-alert aio-alert-success" style="font-size:12px;">'
+                    + '<i class="fas fa-check-circle"></i> ' + resp.message
+                    + '</div>'
+                ).show();
+            },
+            onError: function(resp) {
+                $('#rate-test-result').html(
+                    '<div class="aio-alert aio-alert-danger" style="font-size:12px;">'
+                    + '<i class="fas fa-times-circle"></i> ' + (resp.message || 'API test failed.')
+                    + '</div>'
+                ).show();
+            }
+        });
+    };
 })(jQuery);

@@ -215,10 +215,13 @@ class ProviderController extends BaseController
         // Build credentials
         $credFields = $this->credentialFields[$slug] ?? [];
         $credentials = [];
+        $submittedCreds = $_POST['credentials'] ?? $_REQUEST['credentials'] ?? [];
+
         foreach ($credFields as $field) {
-            $val = $this->rawInput('cred_' . $field['key'], '');
-            if ($field['required'] && empty($val)) {
-                // On edit, if empty, keep existing
+            $val = isset($submittedCreds[$field['key']]) ? trim($submittedCreds[$field['key']]) : '';
+
+            if (empty($val)) {
+                // On edit, if empty, keep existing credentials
                 if ($id > 0) {
                     $existing = Capsule::table('mod_aio_ssl_providers')->find($id);
                     if ($existing && !empty($existing->api_credentials)) {
@@ -226,13 +229,16 @@ class ProviderController extends BaseController
                         $val = $oldCreds[$field['key']] ?? '';
                     }
                 }
-                if (empty($val)) {
+
+                // Still empty after fallback? Check if required
+                if ($field['required'] && empty($val)) {
                     return ['success' => false, 'message' => $field['label'] . ' is required.'];
                 }
             }
+
             $credentials[$field['key']] = $val;
         }
-
+        
         $encryptedCreds = EncryptionService::encryptCredentials($credentials);
         $tier = $this->providerTiers[$slug] ?? 'full';
 

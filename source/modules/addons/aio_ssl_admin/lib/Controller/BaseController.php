@@ -177,10 +177,12 @@ abstract class BaseController
         return [
             'offset'      => ($currentPage - 1) * $this->perPage,
             'limit'       => $this->perPage,
-            'totalPages'  => $totalPages,
-            'currentPage' => $currentPage,
             'total'       => $totalItems,
             'perPage'     => $this->perPage,
+            'page'        => $currentPage,
+            'pages'       => $totalPages,
+            'totalPages'  => $totalPages,
+            'currentPage' => $currentPage,
         ];
     }
 
