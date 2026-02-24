@@ -3,10 +3,21 @@
  * SSL2Buy Provider — Limited-tier SSL provider
  *
  * API: https://api.ssl2buy.com/1.0/
- * Auth: partner_email + api_key
- * Capabilities: Limited (order, status, config link, approval resend)
- *   - Cannot: reissue, renew, revoke, cancel, download cert, change DCV
- *   - Client manages via configuration link from provider portal
+ * Auth: PartnerEmail + ApiKey in JSON body
+ * Content-Type: application/json
+ *
+ * Capabilities: Limited — order, status, config link, approval resend
+ * Cannot: reissue, renew, revoke, cancel, download cert, change DCV
+ *
+ * CRITICAL: SSL2Buy has NO bulk product list API!
+ * Products come from a static catalog (SSL2BuyProducts class).
+ * Pricing is fetched per-product via /orderservice/order/getproductprice.
+ *
+ * CRITICAL: Query endpoints are brand-specific (C8):
+ *   Comodo    → /queryservice/comodo/getorderdetails
+ *   GlobalSign→ /queryservice/globalsign/getorderdetails
+ *   Symantec  → /queryservice/symantec/getorderdetails
+ *   Prime     → /queryservice/prime/primesubscriptionorderdetail
  *
  * @package    AioSSL\Provider
  * @author     HVN GROUP <dev@hvn.vn>
@@ -21,23 +32,103 @@ use AioSSL\Core\UnsupportedOperationException;
 
 class SSL2BuyProvider extends AbstractProvider
 {
-    private const API_URL = 'https://api.ssl2buy.com/1.0';
+    private const API_URL      = 'https://api.ssl2buy.com/1.0';
+    private const DEMO_API_URL = 'https://demo-api.ssl2buy.com/1.0';
 
-    /** @var array Brand → API path mapping */
-    private const BRAND_PATHS = [
-        'sectigo'    => 'Sectigo',
-        'comodo'     => 'Sectigo',    // Legacy name
-        'digicert'   => 'DigiCert',
-        'geotrust'   => 'GeoTrust',
-        'thawte'     => 'Thawte',
-        'rapidssl'   => 'RapidSSL',
-        'globalsign' => 'GlobalSign',
-        'certera'    => 'Certera',
+    /**
+     * Brand → query route mapping (C8: brand-specific routing)
+     */
+    private const BRAND_QUERY_ROUTES = [
+        'Comodo'     => 'comodo',
+        'Sectigo'    => 'comodo',      // Sectigo = Comodo successor
+        'GlobalSign' => 'globalsign',
+        'AlphaSSL'   => 'globalsign',  // AlphaSSL is GlobalSign brand
+        'Symantec'   => 'symantec',
+        'DigiCert'   => 'symantec',    // DigiCert acquired Symantec
+        'GeoTrust'   => 'symantec',
+        'Thawte'     => 'symantec',
+        'RapidSSL'   => 'symantec',
+        'Prime'      => 'prime',
+        'Certera'    => 'comodo',
     ];
 
-    public function getSlug(): string { return 'ssl2buy'; }
-    public function getName(): string { return 'SSL2Buy'; }
-    public function getTier(): string { return 'limited'; }
+    /**
+     * Static product catalog — SSL2Buy has no bulk product list API
+     *
+     * Each entry: [code, name, brand_name, validation, wildcard, san, max_domains]
+     * Source: ref/ssl2buy/lib/SSL2BuyProducts/SSL2BuyProducts.php
+     */
+    private const PRODUCT_CATALOG = [
+        // ── Sectigo (Comodo) DV ──
+        ['code' => 351,  'name' => 'Sectigo PositiveSSL',              'brand' => 'Comodo',     'validation' => 'dv', 'wildcard' => false, 'san' => false, 'max_domains' => 1],
+        ['code' => 549,  'name' => 'Sectigo PositiveSSL Wildcard',     'brand' => 'Comodo',     'validation' => 'dv', 'wildcard' => true,  'san' => false, 'max_domains' => 1],
+        ['code' => 352,  'name' => 'Sectigo PositiveSSL Multi-Domain', 'brand' => 'Comodo',     'validation' => 'dv', 'wildcard' => false, 'san' => true,  'max_domains' => 250],
+        ['code' => 360,  'name' => 'Sectigo EssentialSSL',             'brand' => 'Comodo',     'validation' => 'dv', 'wildcard' => false, 'san' => false, 'max_domains' => 1],
+        ['code' => 361,  'name' => 'Sectigo EssentialSSL Wildcard',    'brand' => 'Comodo',     'validation' => 'dv', 'wildcard' => true,  'san' => false, 'max_domains' => 1],
+        ['code' => 550,  'name' => 'Sectigo SSL Certificate',          'brand' => 'Comodo',     'validation' => 'dv', 'wildcard' => false, 'san' => false, 'max_domains' => 1],
+        ['code' => 547,  'name' => 'Sectigo SSL Wildcard',             'brand' => 'Comodo',     'validation' => 'dv', 'wildcard' => true,  'san' => false, 'max_domains' => 1],
+
+        // ── Sectigo (Comodo) OV ──
+        ['code' => 362,  'name' => 'Sectigo InstantSSL',               'brand' => 'Comodo',     'validation' => 'ov', 'wildcard' => false, 'san' => false, 'max_domains' => 1],
+        ['code' => 551,  'name' => 'Sectigo InstantSSL Premium',       'brand' => 'Comodo',     'validation' => 'ov', 'wildcard' => false, 'san' => false, 'max_domains' => 1],
+        ['code' => 553,  'name' => 'Sectigo InstantSSL Premium Wildcard', 'brand' => 'Comodo',  'validation' => 'ov', 'wildcard' => true,  'san' => false, 'max_domains' => 1],
+        ['code' => 355,  'name' => 'Sectigo OV SSL',                   'brand' => 'Comodo',     'validation' => 'ov', 'wildcard' => false, 'san' => false, 'max_domains' => 1],
+        ['code' => 554,  'name' => 'Sectigo OV Wildcard SSL',          'brand' => 'Comodo',     'validation' => 'ov', 'wildcard' => true,  'san' => false, 'max_domains' => 1],
+        ['code' => 356,  'name' => 'Sectigo Multi-Domain SSL',         'brand' => 'Comodo',     'validation' => 'ov', 'wildcard' => false, 'san' => true,  'max_domains' => 250],
+        ['code' => 555,  'name' => 'Sectigo UCC SSL',                  'brand' => 'Comodo',     'validation' => 'ov', 'wildcard' => false, 'san' => true,  'max_domains' => 250],
+
+        // ── Sectigo (Comodo) EV ──
+        ['code' => 357,  'name' => 'Sectigo EV SSL',                   'brand' => 'Comodo',     'validation' => 'ev', 'wildcard' => false, 'san' => false, 'max_domains' => 1],
+        ['code' => 358,  'name' => 'Sectigo EV Multi-Domain SSL',      'brand' => 'Comodo',     'validation' => 'ev', 'wildcard' => false, 'san' => true,  'max_domains' => 250],
+
+        // ── GlobalSign ──
+        ['code' => 401,  'name' => 'GlobalSign DomainSSL',             'brand' => 'GlobalSign', 'validation' => 'dv', 'wildcard' => false, 'san' => false, 'max_domains' => 1],
+        ['code' => 402,  'name' => 'GlobalSign DomainSSL Wildcard',    'brand' => 'GlobalSign', 'validation' => 'dv', 'wildcard' => true,  'san' => false, 'max_domains' => 1],
+        ['code' => 403,  'name' => 'GlobalSign OrganizationSSL',       'brand' => 'GlobalSign', 'validation' => 'ov', 'wildcard' => false, 'san' => false, 'max_domains' => 1],
+        ['code' => 404,  'name' => 'GlobalSign OrganizationSSL Wildcard', 'brand' => 'GlobalSign', 'validation' => 'ov', 'wildcard' => true, 'san' => false, 'max_domains' => 1],
+        ['code' => 405,  'name' => 'GlobalSign ExtendedSSL',           'brand' => 'GlobalSign', 'validation' => 'ev', 'wildcard' => false, 'san' => false, 'max_domains' => 1],
+
+        // ── AlphaSSL (GlobalSign) ──
+        ['code' => 411,  'name' => 'AlphaSSL',                         'brand' => 'GlobalSign', 'validation' => 'dv', 'wildcard' => false, 'san' => false, 'max_domains' => 1],
+        ['code' => 412,  'name' => 'AlphaSSL Wildcard',                'brand' => 'GlobalSign', 'validation' => 'dv', 'wildcard' => true,  'san' => false, 'max_domains' => 1],
+
+        // ── DigiCert ──
+        ['code' => 501,  'name' => 'DigiCert Standard SSL',            'brand' => 'Symantec',   'validation' => 'ov', 'wildcard' => false, 'san' => false, 'max_domains' => 1],
+        ['code' => 502,  'name' => 'DigiCert EV SSL',                  'brand' => 'Symantec',   'validation' => 'ev', 'wildcard' => false, 'san' => false, 'max_domains' => 1],
+        ['code' => 503,  'name' => 'DigiCert Secure Site SSL',         'brand' => 'Symantec',   'validation' => 'ov', 'wildcard' => false, 'san' => false, 'max_domains' => 1],
+        ['code' => 504,  'name' => 'DigiCert Secure Site Pro SSL',     'brand' => 'Symantec',   'validation' => 'ov', 'wildcard' => false, 'san' => false, 'max_domains' => 1],
+        ['code' => 505,  'name' => 'DigiCert Secure Site EV SSL',      'brand' => 'Symantec',   'validation' => 'ev', 'wildcard' => false, 'san' => false, 'max_domains' => 1],
+        ['code' => 506,  'name' => 'DigiCert Secure Site Pro EV SSL',  'brand' => 'Symantec',   'validation' => 'ev', 'wildcard' => false, 'san' => false, 'max_domains' => 1],
+        ['code' => 507,  'name' => 'DigiCert Wildcard SSL',            'brand' => 'Symantec',   'validation' => 'ov', 'wildcard' => true,  'san' => false, 'max_domains' => 1],
+        ['code' => 508,  'name' => 'DigiCert Multi-Domain SSL',        'brand' => 'Symantec',   'validation' => 'ov', 'wildcard' => false, 'san' => true,  'max_domains' => 250],
+
+        // ── GeoTrust ──
+        ['code' => 601,  'name' => 'GeoTrust QuickSSL Premium',        'brand' => 'Symantec',   'validation' => 'dv', 'wildcard' => false, 'san' => false, 'max_domains' => 1],
+        ['code' => 602,  'name' => 'GeoTrust True BusinessID',         'brand' => 'Symantec',   'validation' => 'ov', 'wildcard' => false, 'san' => false, 'max_domains' => 1],
+        ['code' => 603,  'name' => 'GeoTrust True BusinessID Wildcard','brand' => 'Symantec',   'validation' => 'ov', 'wildcard' => true,  'san' => false, 'max_domains' => 1],
+        ['code' => 604,  'name' => 'GeoTrust True BusinessID EV',      'brand' => 'Symantec',   'validation' => 'ev', 'wildcard' => false, 'san' => false, 'max_domains' => 1],
+
+        // ── RapidSSL ──
+        ['code' => 611,  'name' => 'RapidSSL Standard',                'brand' => 'Symantec',   'validation' => 'dv', 'wildcard' => false, 'san' => false, 'max_domains' => 1],
+        ['code' => 612,  'name' => 'RapidSSL Wildcard',                'brand' => 'Symantec',   'validation' => 'dv', 'wildcard' => true,  'san' => false, 'max_domains' => 1],
+
+        // ── Thawte ──
+        ['code' => 621,  'name' => 'Thawte SSL 123',                   'brand' => 'Symantec',   'validation' => 'dv', 'wildcard' => false, 'san' => false, 'max_domains' => 1],
+        ['code' => 622,  'name' => 'Thawte SSL Web Server',            'brand' => 'Symantec',   'validation' => 'ov', 'wildcard' => false, 'san' => false, 'max_domains' => 1],
+        ['code' => 623,  'name' => 'Thawte SSL Web Server Wildcard',   'brand' => 'Symantec',   'validation' => 'ov', 'wildcard' => true,  'san' => false, 'max_domains' => 1],
+        ['code' => 624,  'name' => 'Thawte SSL Web Server EV',         'brand' => 'Symantec',   'validation' => 'ev', 'wildcard' => false, 'san' => false, 'max_domains' => 1],
+
+        // ── Certera ──
+        ['code' => 701,  'name' => 'Certera SSL',                      'brand' => 'Comodo',     'validation' => 'dv', 'wildcard' => false, 'san' => false, 'max_domains' => 1],
+        ['code' => 702,  'name' => 'Certera Wildcard SSL',             'brand' => 'Comodo',     'validation' => 'dv', 'wildcard' => true,  'san' => false, 'max_domains' => 1],
+        ['code' => 703,  'name' => 'Certera Multi-Domain SSL',         'brand' => 'Comodo',     'validation' => 'dv', 'wildcard' => false, 'san' => true,  'max_domains' => 250],
+    ];
+
+    // ─── Identity ──────────────────────────────────────────────────
+
+    public function getSlug(): string  { return 'ssl2buy'; }
+    public function getName(): string  { return 'SSL2Buy'; }
+    public function getTier(): string  { return 'limited'; }
 
     public function getCapabilities(): array
     {
@@ -49,20 +140,26 @@ class SSL2BuyProvider extends AbstractProvider
 
     protected function getBaseUrl(): string
     {
-        return self::API_URL;
+        // SSL2Buy uses demo URL for test mode
+        $testMode = $this->config['test_mode'] ?? false;
+        return $testMode ? self::DEMO_API_URL : self::API_URL;
     }
 
-    // ─── Auth ──────────────────────────────────────────────────────
+    // ─── Auth (JSON Body) ──────────────────────────────────────────
 
-    private function apiCall(string $endpoint, array $data = [], string $method = 'POST'): array
+    /**
+     * Make API call to SSL2Buy
+     *
+     * All requests: POST with JSON body containing PartnerEmail + ApiKey
+     */
+    private function apiCall(string $endpoint, array $data = []): array
     {
         $url = $this->getBaseUrl() . $endpoint;
-        $data['partnerEmail'] = $this->getCredential('partner_email');
-        $data['apiKey'] = $this->getCredential('api_key');
 
-        if ($method === 'GET') {
-            return $this->httpGet($url, $data);
-        }
+        // SSL2Buy auth: PartnerEmail + ApiKey in request body
+        $data['PartnerEmail'] = $this->getCredential('partner_email');
+        $data['ApiKey'] = $this->getCredential('api_key');
+
         return $this->httpPostJson($url, $data);
     }
 
@@ -85,102 +182,204 @@ class SSL2BuyProvider extends AbstractProvider
     public function getBalance(): array
     {
         $response = $this->apiCall('/orderservice/order/getbalance');
-        if ($response['code'] === 200 && isset($response['decoded']['balance'])) {
-            return ['balance' => (float)$response['decoded']['balance'], 'currency' => 'USD'];
-        }
-        // Fallback: try to parse from response
-        if ($response['code'] === 200 && isset($response['decoded']['result'])) {
-            return ['balance' => (float)($response['decoded']['result']['balance'] ?? 0), 'currency' => 'USD'];
+
+        if ($response['code'] === 200 && isset($response['decoded'])) {
+            $data = $response['decoded'];
+            $balance = $data['Balance'] ?? $data['balance'] ?? $data['result']['balance'] ?? 0;
+            return ['balance' => (float)$balance, 'currency' => 'USD'];
         }
         return ['balance' => 0, 'currency' => 'USD'];
     }
 
     // ─── Products ──────────────────────────────────────────────────
 
+    /**
+     * Fetch all available products from SSL2Buy
+     *
+     * CRITICAL: SSL2Buy has NO bulk product list API!
+     *
+     * Approach (from PDR §2.3.3):
+     * 1. Use static product catalog (PRODUCT_CATALOG constant)
+     * 2. Fetch pricing per product via POST /orderservice/order/getproductprice
+     *
+     * GetProductPrice request body:
+     * {
+     *   "PartnerEmail": "...",
+     *   "ApiKey": "...",
+     *   "ProductCode": 351,
+     *   "NumberOfMonths": 12
+     * }
+     *
+     * GetProductPrice response:
+     * {
+     *   "ProductPrice": 5.99,
+     *   "StatusCode": 0,
+     *   "Message": ""
+     * }
+     *
+     * @return NormalizedProduct[]
+     */
     public function fetchProducts(): array
     {
         $products = [];
 
-        foreach (self::BRAND_PATHS as $slug => $brandPath) {
+        foreach (self::PRODUCT_CATALOG as $catalogItem) {
             try {
-                $response = $this->apiCall("/queryservice/{$brandPath}/productlist");
+                // Fetch pricing for multiple periods
+                $priceData = $this->fetchProductPricing($catalogItem['code']);
 
-                if ($response['code'] !== 200 || empty($response['decoded'])) {
-                    continue;
-                }
+                $products[] = $this->normalizeProduct($catalogItem, $priceData);
 
-                $productList = $response['decoded']['products'] ?? $response['decoded'] ?? [];
-                if (!is_array($productList)) continue;
+                // Rate limit: 200ms between API calls
+                usleep(200000);
 
-                foreach ($productList as $item) {
-                    if (!is_array($item)) continue;
-                    $products[] = $this->normalizeProduct($item, $brandPath);
-                }
-
-                usleep(300000); // 300ms delay between brand calls
             } catch (\Exception $e) {
-                $this->log('warning', "SSL2Buy fetchProducts failed for {$brandPath}: " . $e->getMessage());
+                $this->log('warning', "SSL2Buy: Failed to fetch pricing for product #{$catalogItem['code']}: " . $e->getMessage());
+
+                // Still add product without pricing
+                $products[] = $this->normalizeProduct($catalogItem, ['base' => []]);
             }
         }
+
+        $this->log('info', 'SSL2Buy: Fetched ' . count($products) . ' products from static catalog');
 
         return $products;
     }
 
+    /**
+     * Fetch pricing for a specific product across multiple periods
+     *
+     * @param int $productCode SSL2Buy numeric product code
+     * @return array Normalized pricing ['base' => ['12' => float, '24' => float, ...]]
+     */
+    private function fetchProductPricing(int $productCode): array
+    {
+        $pricing = ['base' => []];
+
+        // Fetch for 12, 24, 36 month periods
+        foreach ([12, 24, 36] as $months) {
+            try {
+                $response = $this->apiCall('/orderservice/order/getproductprice', [
+                    'ProductCode'    => $productCode,
+                    'NumberOfMonths' => $months,
+                ]);
+
+                if ($response['code'] === 200 && isset($response['decoded'])) {
+                    $data = $response['decoded'];
+                    $statusCode = $data['StatusCode'] ?? $data['statusCode'] ?? -1;
+
+                    if ($statusCode == 0 && isset($data['ProductPrice'])) {
+                        $pricing['base'][(string)$months] = (float)$data['ProductPrice'];
+                    }
+                }
+
+                usleep(100000); // 100ms between period calls
+
+            } catch (\Exception $e) {
+                // Skip this period, continue with others
+                $this->log('debug', "SSL2Buy: Pricing failed for #{$productCode}/{$months}mo: " . $e->getMessage());
+            }
+        }
+
+        return $pricing;
+    }
+
     public function fetchPricing(string $productCode): array
     {
-        // Pricing is included in product list response
-        return [];
+        return $this->fetchProductPricing((int)$productCode);
     }
 
     // ─── Order Lifecycle ───────────────────────────────────────────
 
     public function validateOrder(array $params): array
     {
-        return ['valid' => true, 'errors' => []]; // Basic validation only
+        try {
+            $response = $this->apiCall('/orderservice/order/validateorder', [
+                'ProductCode'    => $params['product_code'] ?? '',
+                'CSR'            => $params['csr'] ?? '',
+                'ServerType'     => $params['server_type'] ?? -1,
+                'NumberOfMonths' => $params['period'] ?? 12,
+            ]);
+
+            if ($response['code'] === 200) {
+                $data = $response['decoded'];
+                $statusCode = $data['StatusCode'] ?? -1;
+                return [
+                    'valid'  => ($statusCode == 0),
+                    'errors' => ($statusCode != 0) ? [$data['Message'] ?? 'Validation failed'] : [],
+                ];
+            }
+            return ['valid' => false, 'errors' => ['HTTP ' . $response['code']]];
+        } catch (\Exception $e) {
+            return ['valid' => false, 'errors' => [$e->getMessage()]];
+        }
     }
 
     public function placeOrder(array $params): array
     {
-        $brand = $params['brand'] ?? 'Sectigo';
-        $brandPath = self::BRAND_PATHS[strtolower($brand)] ?? $brand;
-
         $data = [
-            'productCode'   => $params['product_code'] ?? '',
-            'csr'           => $params['csr'] ?? '',
-            'period'        => $params['period'] ?? 12,
-            'serverType'    => $params['server_type'] ?? -1,
-            'approverEmail' => $params['dcv_email'] ?? '',
+            'ProductCode'    => $params['product_code'] ?? '',
+            'CSR'            => $params['csr'] ?? '',
+            'ServerType'     => $params['server_type'] ?? -1,
+            'NumberOfMonths' => $params['period'] ?? 12,
+            'ApproverEmail'  => $params['dcv_email'] ?? '',
+            'WebServerType'  => $params['server_type'] ?? '',
         ];
 
         if (isset($params['domains'])) {
-            $data['domainNames'] = is_array($params['domains'])
+            $data['DomainNames'] = is_array($params['domains'])
                 ? implode(',', $params['domains'])
                 : $params['domains'];
         }
 
-        $response = $this->apiCall("/orderservice/{$brandPath}/placeorder", $data);
+        // Admin contact
+        if (isset($params['admin_contact'])) {
+            $data['AdminContact'] = $params['admin_contact'];
+        }
+
+        $response = $this->apiCall('/orderservice/order/placeorder', $data);
 
         if ($response['code'] !== 200) {
-            $msg = $response['decoded']['message'] ?? 'Order failed';
+            $msg = $response['decoded']['Message'] ?? 'Order failed';
             throw new \RuntimeException("SSL2Buy placeOrder: {$msg}");
         }
 
         $result = $response['decoded'];
-        $orderId = $result['orderId'] ?? $result['order_id'] ?? '';
+        $statusCode = $result['StatusCode'] ?? -1;
+
+        if ($statusCode != 0) {
+            throw new \RuntimeException("SSL2Buy: " . ($result['Message'] ?? 'Order failed'));
+        }
+
+        $orderId = $result['OrderNumber'] ?? $result['orderId'] ?? $result['order_id'] ?? '';
 
         $this->log('info', 'SSL2Buy order placed', ['order_id' => $orderId]);
 
         return [
             'order_id' => (string)$orderId,
             'status'   => 'Pending',
-            'extra'    => array_merge($result, ['brand' => $brandPath]),
+            'extra'    => $result,
         ];
     }
 
+    /**
+     * Get order status — Brand-specific routing (C8)
+     */
     public function getOrderStatus(string $orderId): array
     {
-        $response = $this->apiCall('/orderservice/order/getstatus', [
-            'orderId' => $orderId,
+        // Try to determine brand from stored order data
+        $brand = $this->config['brand'] ?? 'Comodo';
+        $brandRoute = self::BRAND_QUERY_ROUTES[$brand] ?? 'comodo';
+
+        // Prime uses different endpoint
+        if ($brandRoute === 'prime') {
+            $endpoint = "/queryservice/prime/primesubscriptionorderdetail";
+        } else {
+            $endpoint = "/queryservice/{$brandRoute}/getorderdetails";
+        }
+
+        $response = $this->apiCall($endpoint, [
+            'OrderNumber' => $orderId,
         ]);
 
         if ($response['code'] !== 200) {
@@ -190,32 +389,33 @@ class SSL2BuyProvider extends AbstractProvider
         $data = $response['decoded'];
 
         return [
-            'status'      => $this->normalizeStatus($data['status'] ?? $data['orderStatus'] ?? ''),
-            'certificate' => null, // SSL2Buy: cert downloaded via config link
-            'domains'     => isset($data['domain']) ? [$data['domain']] : [],
-            'begin_date'  => $data['certificateStartDate'] ?? null,
-            'end_date'    => $data['certificateEndDate'] ?? null,
-            'dcv_status'  => [],
-            'raw'         => $data,
+            'status'      => $this->normalizeStatus($data['OrderStatus'] ?? $data['Status'] ?? ''),
+            'certificate' => null, // SSL2Buy: cert managed via config link
+            'domains'     => isset($data['DomainName']) ? [$data['DomainName']] : [],
+            'begin_date'  => $data['CertificateStartDate'] ?? $data['StartDate'] ?? null,
+            'end_date'    => $data['CertificateEndDate'] ?? $data['EndDate'] ?? null,
+            'extra'       => $data,
         ];
     }
 
-    // ─── Config Link (Primary management method) ───────────────────
-
+    /**
+     * Get SSL2Buy configuration link — primary management method for limited tier
+     */
     public function getConfigurationLink(string $orderId): array
     {
         $response = $this->apiCall('/orderservice/order/getsslconfigurationlink', [
-            'orderId' => $orderId,
+            'OrderNumber' => $orderId,
         ]);
 
         if ($response['code'] !== 200) {
-            throw new \RuntimeException('Failed to get configuration link.');
+            throw new \RuntimeException('SSL2Buy: Failed to get configuration link');
         }
 
         $data = $response['decoded'];
+
         return [
-            'url' => $data['configurationLink'] ?? $data['url'] ?? '',
-            'pin' => $data['pin'] ?? $data['configurationPin'] ?? null,
+            'link' => $data['ConfigurationLink'] ?? $data['configLink'] ?? '',
+            'pin'  => $data['Pin'] ?? $data['pin'] ?? '',
         ];
     }
 
@@ -223,18 +423,25 @@ class SSL2BuyProvider extends AbstractProvider
 
     public function getDcvEmails(string $domain): array
     {
-        throw new UnsupportedOperationException($this->getName(), 'getDcvEmails');
+        // SSL2Buy does not have a DCV emails endpoint
+        return [];
     }
 
+    /**
+     * Resend approval email — Brand-routed (C8)
+     */
     public function resendDcvEmail(string $orderId, string $email = ''): array
     {
-        // SSL2Buy: resend approval via brand-specific endpoint
-        // We need the brand from the order's configdata
-        $response = $this->apiCall('/queryservice/resendapprovalemail', [
-            'orderId' => $orderId,
+        $brand = $this->config['brand'] ?? 'Comodo';
+        $brandRoute = self::BRAND_QUERY_ROUTES[$brand] ?? 'comodo';
+
+        $response = $this->apiCall("/queryservice/{$brandRoute}/resendapprovalemail", [
+            'OrderNumber' => $orderId,
         ]);
 
-        $success = ($response['code'] === 200);
+        $success = ($response['code'] === 200 &&
+            ($response['decoded']['StatusCode'] ?? -1) == 0);
+
         return [
             'success' => $success,
             'message' => $success ? 'Approval email resent.' : 'Failed to resend.',
@@ -275,59 +482,79 @@ class SSL2BuyProvider extends AbstractProvider
 
     // ─── Helpers ───────────────────────────────────────────────────
 
-    private function normalizeProduct(array $item, string $brand): NormalizedProduct
+    /**
+     * Normalize product from static catalog + fetched pricing
+     *
+     * @param array $catalogItem Static catalog entry
+     * @param array $priceData   Fetched pricing data
+     * @return NormalizedProduct
+     */
+    private function normalizeProduct(array $catalogItem, array $priceData): NormalizedProduct
     {
-        $name = $item['productName'] ?? $item['name'] ?? '';
-        $nameLower = strtolower($name);
+        $name = $catalogItem['name'];
+        $code = (string)$catalogItem['code'];
 
+        // Determine product type
         $type = 'ssl';
-        if (strpos($nameLower, 'wildcard') !== false) $type = 'wildcard';
-        elseif (strpos($nameLower, 'multi') !== false || strpos($nameLower, 'san') !== false || strpos($nameLower, 'ucc') !== false) $type = 'multi_domain';
-        elseif (strpos($nameLower, 'code sign') !== false) $type = 'code_signing';
-        elseif (strpos($nameLower, 'email') !== false || strpos($nameLower, 's/mime') !== false) $type = 'email';
-
-        $validation = 'dv';
-        if (strpos($nameLower, ' ev') !== false || strpos($nameLower, 'extended') !== false) $validation = 'ev';
-        elseif (strpos($nameLower, ' ov') !== false || strpos($nameLower, 'organization') !== false) $validation = 'ov';
-
-        $priceData = ['base' => []];
-        if (isset($item['price']) || isset($item['prices'])) {
-            $prices = $item['prices'] ?? ['1' => $item['price'] ?? 0];
-            foreach ($prices as $period => $price) {
-                $months = (int)$period * 12;
-                if ($months > 0) {
-                    $priceData['base'][(string)$months] = (float)$price;
-                }
-            }
+        if ($catalogItem['wildcard']) {
+            $type = 'wildcard';
+        } elseif ($catalogItem['san']) {
+            $type = 'multi_domain';
         }
 
-        $code = $item['productCode'] ?? $item['id'] ?? '';
-
         return new NormalizedProduct([
-            'product_code'     => (string)$code,
+            'product_code'     => $code,  // SSL2Buy uses numeric code as string
             'product_name'     => $name,
-            'vendor'           => $brand,
-            'validation_type'  => $validation,
+            'vendor'           => $this->mapBrandToVendor($catalogItem['brand']),
+            'validation_type'  => $catalogItem['validation'],
             'product_type'     => $type,
-            'support_wildcard' => ($type === 'wildcard'),
-            'support_san'      => ($type === 'multi_domain'),
-            'max_domains'      => (int)($item['maxDomains'] ?? 1),
-            'max_years'        => (int)($item['maxPeriod'] ?? 2),
+            'support_wildcard' => $catalogItem['wildcard'],
+            'support_san'      => $catalogItem['san'],
+            'max_domains'      => $catalogItem['max_domains'],
+            'max_years'        => 3,
             'min_years'        => 1,
             'price_data'       => $priceData,
-            'extra_data'       => ['brand' => $brand, 'ssl2buy_code' => $code],
+            'extra_data'       => [
+                'ssl2buy_code'  => (int)$catalogItem['code'],
+                'brand_name'    => $catalogItem['brand'],
+                'brand_route'   => self::BRAND_QUERY_ROUTES[$catalogItem['brand']] ?? 'comodo',
+            ],
         ]);
     }
 
+    /**
+     * Map SSL2Buy internal brand names to vendor display names
+     */
+    private function mapBrandToVendor(string $brand): string
+    {
+        $map = [
+            'Comodo'     => 'Sectigo',
+            'GlobalSign' => 'GlobalSign',
+            'Symantec'   => 'DigiCert',
+            'Prime'      => 'PrimeSSL',
+        ];
+        return $map[$brand] ?? $brand;
+    }
+
+    /**
+     * Normalize SSL2Buy status strings
+     */
     private function normalizeStatus(string $status): string
     {
         $map = [
-            'active' => 'Completed', 'issued' => 'Completed',
-            'pending' => 'Pending', 'processing' => 'Processing',
-            'cancelled' => 'Cancelled', 'expired' => 'Expired',
-            'rejected' => 'Rejected', 'awaiting_validation' => 'Pending',
-            'new' => 'Awaiting Configuration',
+            'active'          => 'Issued',
+            'issued'          => 'Issued',
+            'completed'       => 'Issued',
+            'pending'         => 'Pending',
+            'processing'      => 'Processing',
+            'initial'         => 'Pending',
+            'cancelled'       => 'Cancelled',
+            'revoked'         => 'Revoked',
+            'expired'         => 'Expired',
+            'rejected'        => 'Rejected',
+            'waiting_approval'=> 'Awaiting Approval',
         ];
-        return $map[strtolower(str_replace(' ', '_', trim($status)))] ?? ucfirst($status);
+
+        return $map[strtolower(trim($status))] ?? $status;
     }
 }
