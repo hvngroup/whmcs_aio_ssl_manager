@@ -396,6 +396,139 @@
         }
     };
 
+        /**
+     * Escape HTML to prevent XSS
+     * @param {string} str
+     * @returns {string}
+     */
+    AioSSL.escHtml = function(str) {
+        if (!str) return '';
+        var div = document.createElement('div');
+        div.appendChild(document.createTextNode(str));
+        return div.innerHTML;
+    };
+
+    /**
+     * Format balance with currency symbol
+     * @param {number} amount
+     * @param {string} currency  USD|EUR|GBP|VND
+     * @returns {string}
+     */
+    AioSSL.formatBalance = function(amount, currency) {
+        var symbols = { USD: '$', EUR: '€', GBP: '£', VND: '₫' };
+        var symbol = symbols[currency] || (currency + ' ');
+        var num = parseFloat(amount);
+
+        if (currency === 'VND') {
+            return symbol + num.toLocaleString('vi-VN', { maximumFractionDigits: 0 });
+        }
+        return symbol + num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    };
+
+    // ─── Provider Balance ──────────────────────────────────────
+
+    /**
+     * Render balance HTML into a cell
+     * @param {jQuery} $cell  Target <td> element
+     * @param {object} data   { balance, currency, error, supported }
+     * @param {string} slug   Provider slug (for refresh button)
+     */
+    AioSSL._renderBalanceCell = function($cell, data, slug) {
+        if (!data.supported) {
+            $cell.html('<span class="text-muted" title="Not supported by this provider">&mdash;</span>');
+            return;
+        }
+
+        if (data.error || data.balance === null || data.balance === undefined) {
+            $cell.html(
+                '<span class="text-danger" title="' + AioSSL.escHtml(data.error || 'Failed to load') + '">' +
+                '<i class="fas fa-exclamation-triangle"></i> Error</span>'
+            );
+            return;
+        }
+
+        var bal = parseFloat(data.balance);
+        var colorClass = bal < 50 ? 'text-danger' : (bal < 200 ? 'text-warning' : 'text-success');
+        var formatted = AioSSL.formatBalance(bal, data.currency || 'USD');
+
+        $cell.html(
+            '<span class="' + colorClass + '" style="font-weight:600">' + formatted + '</span>' +
+            ' <a href="#" class="aio-refresh-balance" data-slug="' + AioSSL.escHtml(slug) + '" ' +
+            'style="color:#bbb;font-size:10px" title="Refresh balance">' +
+            '<i class="fas fa-sync-alt"></i></a>'
+        );
+    };
+
+    /**
+     * Load balances for ALL providers on Providers page
+     * Called once on page load — populates all balance cells
+     */
+    AioSSL.loadAllBalances = function() {
+        // Only run if balance cells exist
+        if (!$('[id^="balance-"]').length) return;
+
+        AioSSL.ajax({
+            page: 'providers',
+            action: 'get_all_balances',
+            loading: false,            // no overlay — silent background fetch
+            successMessage: false,     // no toast
+            onSuccess: function(resp) {
+                if (!resp.balances) return;
+
+                $.each(resp.balances, function(slug, data) {
+                    var $cell = $('#balance-' + slug);
+                    if ($cell.length) {
+                        AioSSL._renderBalanceCell($cell, data, slug);
+                    }
+                });
+            },
+            onError: function() {
+                // Silent fail — replace spinners with dash
+                $('[id^="balance-"] .aio-balance-loading').closest('td')
+                    .html('<span class="text-muted">&mdash;</span>');
+            }
+        });
+    };
+
+    /**
+     * Refresh balance for a single provider
+     * @param {string} slug Provider slug
+     */
+    AioSSL.refreshBalance = function(slug) {
+        var $cell = $('#balance-' + slug);
+        if (!$cell.length) return;
+
+        $cell.html('<i class="fas fa-spinner fa-spin text-muted"></i>');
+
+        AioSSL.ajax({
+            page: 'providers',
+            action: 'get_balance',
+            data: { slug: slug },
+            loading: false,
+            successMessage: false,
+            onSuccess: function(resp) {
+                AioSSL._renderBalanceCell($cell, {
+                    supported: true,
+                    balance: resp.balance,
+                    currency: resp.currency || 'USD',
+                    error: resp.success ? null : resp.message
+                }, slug);
+            },
+            onError: function() {
+                AioSSL._renderBalanceCell($cell, {
+                    supported: true, balance: null, error: 'Request failed'
+                }, slug);
+            }
+        });
+    };
+
+    // ─── Event Delegates (balance refresh click) ───────────────
+
+    $(document).on('click', '.aio-refresh-balance', function(e) {
+        e.preventDefault();
+        AioSSL.refreshBalance($(this).data('slug'));
+    });
+
     // ─── Init ──────────────────────────────────────────────────
 
     $(document).ready(function() {
@@ -409,6 +542,11 @@
             var checked = $(this).prop('checked');
             $(this).closest('table').find('.aio-check-item').prop('checked', checked);
         });
+
+        // Auto-load balances if on providers page        
+        if ($('[id^="balance-"]').length) {
+            AioSSL.loadAllBalances();
+        }
     });
 
     /**

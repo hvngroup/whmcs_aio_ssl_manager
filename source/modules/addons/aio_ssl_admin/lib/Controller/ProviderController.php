@@ -84,12 +84,90 @@ class ProviderController extends BaseController
                 return $this->deleteProvider();
             case 'credential_fields':
                 return $this->getCredentialFields();
+            case 'get_balance': 
+                return $this->fetchBalance();
+            case 'get_all_balances': 
+                return $this->fetchAllBalances();
             default:
                 return ['success' => false, 'message' => 'Unknown action'];
         }
     }
 
     // ─── Render Methods ────────────────────────────────────────────
+
+    /**
+     * Fetch balance for a single provider
+     * AJAX: page=providers&action=get_balance&slug=gogetssl
+     */
+    private function fetchBalance(): array
+    {
+        $slug = $this->input('slug');
+        if (empty($slug)) {
+            return ['success' => false, 'message' => 'Provider slug is required.'];
+        }
+
+        try {
+            $provider = ProviderRegistry::get($slug);
+            $caps = $provider->getCapabilities();
+
+            if (!in_array('balance', $caps)) {
+                return ['success' => false, 'message' => 'Balance not supported.', 'balance' => null];
+            }
+
+            $result = $provider->getBalance();
+
+            return [
+                'success'  => true,
+                'balance'  => $result['balance'] ?? 0,
+                'currency' => $result['currency'] ?? 'USD',
+                'slug'     => $slug,
+            ];
+        } catch (\Exception $e) {
+            return ['success' => false, 'message' => $e->getMessage(), 'balance' => null, 'slug' => $slug];
+        }
+    }
+
+    /**
+     * Fetch balances for ALL enabled providers that support 'balance'
+     * AJAX: page=providers&action=get_all_balances
+     *
+     * Called once on page load to populate balance column
+     */
+    private function fetchAllBalances(): array
+    {
+        $balances = [];
+
+        try {
+            $providers = ProviderRegistry::getAllEnabled();
+
+            foreach ($providers as $slug => $provider) {
+                $caps = $provider->getCapabilities();
+                if (!in_array('balance', $caps)) {
+                    $balances[$slug] = ['supported' => false];
+                    continue;
+                }
+
+                try {
+                    $result = $provider->getBalance();
+                    $balances[$slug] = [
+                        'supported' => true,
+                        'balance'   => $result['balance'] ?? 0,
+                        'currency'  => $result['currency'] ?? 'USD',
+                    ];
+                } catch (\Exception $e) {
+                    $balances[$slug] = [
+                        'supported' => true,
+                        'balance'   => null,
+                        'error'     => $e->getMessage(),
+                    ];
+                }
+            }
+        } catch (\Exception $e) {
+            return ['success' => false, 'message' => $e->getMessage()];
+        }
+
+        return ['success' => true, 'balances' => $balances];
+    }
 
     /**
      * Render provider list table
@@ -101,10 +179,22 @@ class ProviderController extends BaseController
         $existingSlugs = array_map(function ($p) { return $p->slug; }, $providers);
         $availableSlugs = array_diff($registeredSlugs, $existingSlugs);
 
+        $balanceSupport = [];
+        foreach ($providers as $p) {
+            try {
+                $inst = ProviderRegistry::get($p->slug);
+                $caps = $inst->getCapabilities();
+                $balanceSupport[$p->slug] = in_array('balance', $caps);
+            } catch (\Exception $e) {
+                $balanceSupport[$p->slug] = false;
+            }
+        }
+
         $this->renderTemplate('providers.php', [
             'providers'      => $providers,
             'availableSlugs' => $availableSlugs,
             'canAdd'         => !empty($availableSlugs),
+            'balanceSupport' => $balanceSupport,
         ]);
     }
 
@@ -238,7 +328,7 @@ class ProviderController extends BaseController
 
             $credentials[$field['key']] = $val;
         }
-        
+
         $encryptedCreds = EncryptionService::encryptCredentials($credentials);
         $tier = $this->providerTiers[$slug] ?? 'full';
 

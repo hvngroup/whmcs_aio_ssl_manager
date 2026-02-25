@@ -77,6 +77,7 @@ $providerColors = [
                         <th><?= $lang['last_test'] ?? 'Last Test' ?></th>
                         <th><?= $lang['last_sync'] ?? 'Last Sync' ?></th>
                         <th><?= $lang['products_count'] ?? 'Products' ?></th>
+                        <th class="text-right"><?= $lang['balance'] ?? 'Balance' ?></th>                        
                         <th class="text-center"><?= $lang['actions'] ?? 'Actions' ?></th>
                     </tr>
                 </thead>
@@ -157,6 +158,17 @@ $providerColors = [
                         <span class="aio-badge aio-badge-primary"><?= $prodCount ?></span>
                     </td>
 
+                    <!-- Provider Balance -->                    
+                    <td class="text-right" id="balance-<?= htmlspecialchars($p->slug) ?>">
+                        <?php if (!empty($balanceSupport[$p->slug])): ?>
+                            <span class="aio-balance-loading text-muted">
+                                <i class="fas fa-spinner fa-spin"></i>
+                            </span>
+                        <?php else: ?>
+                            <span class="text-muted" title="Balance not supported by this provider">—</span>
+                        <?php endif; ?>
+                    </td>
+
                     <!-- Actions -->
                     <td class="text-center">
                         <div class="aio-btn-group">
@@ -223,7 +235,8 @@ $providerColors = [
                         'Revoke'           => ['nicsrs'=>true, 'gogetssl'=>true, 'thesslstore'=>true, 'ssl2buy'=>false],
                         'Cancel / Refund'  => ['nicsrs'=>true, 'gogetssl'=>true, 'thesslstore'=>true, 'ssl2buy'=>false],
                         'DCV Management'   => ['nicsrs'=>true, 'gogetssl'=>true, 'thesslstore'=>true, 'ssl2buy'=>'partial'],
-                        'Balance Check'    => ['nicsrs'=>false,'gogetssl'=>true, 'thesslstore'=>false,'ssl2buy'=>true],
+                        'Balance Check'    => ['nicsrs'=>false,'gogetssl'=>true, 'thesslstore'=>true,'ssl2buy'=>true],
+                        'Config Link'      => ['nicsrs'=>false, 'gogetssl'=>false, 'thesslstore'=>false, 'ssl2buy'=>true],
                     ];
                     foreach ($capabilities as $cap => $map):
                     ?>
