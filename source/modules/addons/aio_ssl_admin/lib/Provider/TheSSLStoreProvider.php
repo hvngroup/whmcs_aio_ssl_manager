@@ -133,28 +133,36 @@ class TheSSLStoreProvider extends AbstractProvider
 
     /**
      * Check if API response contains an error
+     *
+     * NOTE: Do NOT use for /user/accountdetail — that endpoint 
+     * always returns isError:true even on success.
      */
     private function hasError(array $response): bool
     {
         $d = $response['decoded'] ?? [];
 
-        // Direct AuthResponse.isError
-        if (isset($d['AuthResponse']['isError']) && $d['AuthResponse']['isError']) {
-            return true;
+        if (!is_array($d)) {
+            return false;
         }
 
-        // Array response — check first element
-        if (is_array($d) && isset($d[0])) {
-            $first = is_array($d[0]) ? $d[0] : (array)$d[0];
-            $auth  = $first['AuthResponse'] ?? null;
-            if ($auth && !empty($auth['isError'])) {
-                return true;
+        // Direct AuthResponse.isError — strict check
+        if (isset($d['AuthResponse']['isError'])) {
+            $val = $d['AuthResponse']['isError'];
+            return ($val === true || $val === 'true' || $val === 1 || $val === '1');
+        }
+
+        // Array response (e.g. product/query)
+        if (isset($d[0]) && is_array($d[0])) {
+            $auth = $d[0]['AuthResponse'] ?? null;
+            if (is_array($auth) && isset($auth['isError'])) {
+                $val = $auth['isError'];
+                return ($val === true || $val === 'true' || $val === 1 || $val === '1');
             }
         }
 
         return false;
     }
-
+    
     /**
      * Extract error message from API response
      */
@@ -162,16 +170,34 @@ class TheSSLStoreProvider extends AbstractProvider
     {
         $d = $response['decoded'] ?? [];
 
+        if (!is_array($d)) {
+            return 'Invalid API response (HTTP ' . ($response['code'] ?? '?') . ')';
+        }
+
         // Direct AuthResponse
         if (isset($d['AuthResponse']['Message'])) {
             $msg = $d['AuthResponse']['Message'];
-            return is_array($msg) ? implode('; ', $msg) : (string)$msg;
+            if (is_array($msg)) {
+                $filtered = array_filter($msg, fn($v) => $v !== null && $v !== '');
+                if (!empty($filtered)) {
+                    return implode('; ', $filtered);
+                }
+            } elseif (is_string($msg) && $msg !== '') {
+                return $msg;
+            }
         }
 
         // Array response
-        if (is_array($d) && isset($d[0]['AuthResponse']['Message'])) {
+        if (isset($d[0]['AuthResponse']['Message'])) {
             $msg = $d[0]['AuthResponse']['Message'];
-            return is_array($msg) ? implode('; ', $msg) : (string)$msg;
+            if (is_array($msg)) {
+                $filtered = array_filter($msg, fn($v) => $v !== null && $v !== '');
+                if (!empty($filtered)) {
+                    return implode('; ', $filtered);
+                }
+            } elseif (is_string($msg) && $msg !== '') {
+                return $msg;
+            }
         }
 
         return 'Unknown TheSSLStore error (HTTP ' . ($response['code'] ?? '?') . ')';
@@ -184,32 +210,25 @@ class TheSSLStoreProvider extends AbstractProvider
     public function testConnection(): array
     {
         try {
-            // Use account detail to verify credentials AND get balance
             $account = $this->getUserAccountDetail();
 
             if (!$account['success']) {
-                return ['success' => false, 'message' => $account['error'] ?? 'Connection failed.', 'balance' => null];
+                return [
+                    'success' => false,
+                    'message' => $account['error'] ?: 'Connection failed. Check API credentials.',
+                    'balance' => null,
+                ];
             }
 
-            // Try to extract balance from account detail
-            $balance = null;
-            $data = $account['account'];
-            $balanceVal = (float)(
-                $data['AccountBalance'] ?? $data['accountBalance']
-                ?? $data['Balance'] ?? $data['balance']
-                ?? $data['AvailableBalance'] ?? 0
-            );
-            if ($balanceVal > 0) {
-                $balance = $balanceVal;
-            }
-
+            $data    = $account['account'];
+            $balance = (float)($data['AccountBalance'] ?? 0);
             $currency = $data['CurrencyCode'] ?? $data['Currency'] ?? 'USD';
-            $msg = 'Connected to TheSSLStore.';
-            if ($balance !== null) {
-                $msg .= ' Balance: ' . $currency . ' ' . number_format($balance, 2);
-            }
 
-            return ['success' => true, 'message' => $msg, 'balance' => $balance];
+            return [
+                'success' => true,
+                'message' => 'Connected to TheSSLStore. Balance: ' . $currency . ' ' . number_format($balance, 2),
+                'balance' => $balance,
+            ];
 
         } catch (\Exception $e) {
             return ['success' => false, 'message' => $e->getMessage(), 'balance' => null];
@@ -1159,11 +1178,6 @@ class TheSSLStoreProvider extends AbstractProvider
      *
      * TheSSLStore has NO dedicated /balance endpoint.
      * Balance is extracted from /user/accountdetail response.
-     *
-     * Implements ProviderInterface::getBalance()
-     *
-     * @return array ['balance' => float, 'currency' => string]
-     * @throws \RuntimeException on API failure
      */
     public function getBalance(): array
     {
@@ -1171,19 +1185,12 @@ class TheSSLStoreProvider extends AbstractProvider
 
         if (!$account['success']) {
             throw new \RuntimeException(
-                'TheSSLStore getBalance failed: ' . ($account['error'] ?? 'Unknown error')
+                'TheSSLStore getBalance failed: ' . ($account['error'] ?: 'Unknown error')
             );
         }
 
         $data = $account['account'];
-
-        // TheSSLStore accountdetail returns balance in various possible fields
-        $balance = (float)(
-            $data['AccountBalance'] ?? $data['accountBalance']
-            ?? $data['Balance'] ?? $data['balance']
-            ?? $data['AvailableBalance'] ?? $data['availableBalance']
-            ?? 0
-        );
+        $balance = (float)($data['AccountBalance'] ?? $data['accountBalance'] ?? 0);
         $currency = $data['CurrencyCode'] ?? $data['Currency'] ?? 'USD';
 
         return ['balance' => $balance, 'currency' => $currency];
@@ -1194,16 +1201,37 @@ class TheSSLStoreProvider extends AbstractProvider
      *
      * POST /user/accountdetail
      * Returns partner info: name, email, balance, currency, etc.
+     *
+     * NOTE: TheSSLStore API returns isError:true even on success for this
+     * endpoint. We validate by checking for actual account data fields.
      */
     public function getUserAccountDetail(): array
     {
         $response = $this->apiCall('/user/accountdetail/', []);
 
-        if ($response['code'] !== 200 || $this->hasError($response)) {
-            return ['success' => false, 'error' => $this->extractError($response)];
+        $httpCode = $response['code'] ?? 0;
+        $decoded  = $response['decoded'] ?? null;
+
+        // HTTP-level or decode failure
+        if ($httpCode < 200 || $httpCode >= 300 || !is_array($decoded)) {
+            return [
+                'success' => false,
+                'error'   => 'API request failed (HTTP ' . $httpCode . ')',
+            ];
         }
 
-        return ['success' => true, 'account' => $response['decoded'] ?? []];
+        // Success check: if account data fields exist, it's a valid response
+        // (ignore isError — TheSSLStore always sets it to true for this endpoint)
+        if (isset($decoded['PartnerCode']) || isset($decoded['AccountBalance'])) {
+            return ['success' => true, 'account' => $decoded];
+        }
+
+        // No account data → real error
+        $error = $this->extractError($response);
+        return [
+            'success' => false,
+            'error'   => $error ?: 'No account data returned',
+        ];
     }
 
     // ═══════════════════════════════════════════════════════════════
