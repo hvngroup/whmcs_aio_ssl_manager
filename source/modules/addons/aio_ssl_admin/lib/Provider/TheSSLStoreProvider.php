@@ -1200,19 +1200,27 @@ class TheSSLStoreProvider extends AbstractProvider
      * Get user account details
      *
      * POST /user/accountdetail
-     * Returns partner info: name, email, balance, currency, etc.
      *
-     * NOTE: TheSSLStore API returns isError:true even on success for this
-     * endpoint. We validate by checking for actual account data fields.
+     * IMPORTANT: This endpoint expects a FLAT auth body (no AuthRequest wrapper):
+     *   { "PartnerCode": "x", "AuthToken": "y" }
+     * Unlike other endpoints that expect:
+     *   { "AuthRequest": { "PartnerCode": "x", ... } }
      */
     public function getUserAccountDetail(): array
     {
-        $response = $this->apiCall('/user/accountdetail/', []);
+        $url = $this->getBaseUrl() . '/user/accountdetail/';
+
+        $body = [
+            'PartnerCode' => $this->getCredential('partner_code'),
+            'AuthToken'   => $this->getCredential('auth_token'),
+            'UserAgent'   => 'AioSSL-WHMCS/1.0',
+        ];
+
+        $response = $this->httpPostJson($url, $body);
 
         $httpCode = $response['code'] ?? 0;
         $decoded  = $response['decoded'] ?? null;
 
-        // HTTP-level or decode failure
         if ($httpCode < 200 || $httpCode >= 300 || !is_array($decoded)) {
             return [
                 'success' => false,
@@ -1220,13 +1228,11 @@ class TheSSLStoreProvider extends AbstractProvider
             ];
         }
 
-        // Success check: if account data fields exist, it's a valid response
-        // (ignore isError — TheSSLStore always sets it to true for this endpoint)
         if (isset($decoded['PartnerCode']) || isset($decoded['AccountBalance'])) {
             return ['success' => true, 'account' => $decoded];
         }
 
-        // No account data → real error
+        // No account data —  error
         $error = $this->extractError($response);
         return [
             'success' => false,
