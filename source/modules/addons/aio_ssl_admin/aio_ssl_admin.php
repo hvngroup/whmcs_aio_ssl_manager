@@ -126,24 +126,34 @@ function aio_ssl_admin_activate()
         // Table: mod_aio_ssl_orders
         $pdo->exec("CREATE TABLE IF NOT EXISTS `mod_aio_ssl_orders` (
             `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
+            `userid` int(10) unsigned NOT NULL DEFAULT 0,
             `service_id` int(10) unsigned NOT NULL,
             `provider_slug` varchar(50) NOT NULL,
             `remote_id` varchar(100) DEFAULT NULL,
             `canonical_id` varchar(100) DEFAULT NULL,
             `product_code` varchar(100) DEFAULT NULL,
             `domain` varchar(255) DEFAULT NULL,
+            `certtype` varchar(255) DEFAULT NULL,
             `status` varchar(50) NOT NULL DEFAULT 'Awaiting Configuration',
-            `configdata` longtext,
+            `configdata` longtext DEFAULT NULL,
+            `completiondate` datetime DEFAULT NULL,
+            `begin_date` datetime DEFAULT NULL,
+            `end_date` datetime DEFAULT NULL,
             `legacy_table` varchar(100) DEFAULT NULL,
             `legacy_order_id` int(10) DEFAULT NULL,
+            `legacy_module` varchar(100) DEFAULT NULL,
             `created_at` timestamp DEFAULT CURRENT_TIMESTAMP,
             `updated_at` timestamp DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             PRIMARY KEY (`id`),
+            KEY `idx_userid` (`userid`),
             KEY `idx_service` (`service_id`),
             KEY `idx_provider` (`provider_slug`),
             KEY `idx_remote` (`remote_id`),
             KEY `idx_status` (`status`),
-            KEY `idx_domain` (`domain`)
+            KEY `idx_domain` (`domain`),
+            KEY `idx_end_date` (`end_date`),
+            KEY `idx_legacy_lookup` (`legacy_table`, `legacy_order_id`),
+            KEY `idx_legacy_module` (`legacy_module`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
 
         // Table: mod_aio_ssl_settings
