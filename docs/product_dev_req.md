@@ -1327,8 +1327,8 @@ curl_post($this->baseUrl . '/product/query', $payload, [
 $payload = json_encode([
     'PartnerEmail' => $email,
     'ApiKey' => $apiKey,
-    'ProductCode' => 351,
-    'NumberOfMonths' => 12
+    'ProductID' => 351,
+    'Year' => 12
 ]);
 curl_post($this->baseUrl . '/orderservice/order/getproductprice', $payload, [
     'Content-Type: application/json'

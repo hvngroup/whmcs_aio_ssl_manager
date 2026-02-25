@@ -1,133 +1,87 @@
 <?php
-/**
- * GoGetSSL Provider — Full-tier SSL provider integration
- *
- * API: https://my.gogetssl.com/api/
- * Auth: Username/Password → session token (POST /auth/)
- * Token: Passed as auth_key query parameter. Must refresh on 401.
- * Capabilities: Full lifecycle
- *
- * CRITICAL: Products use NUMERIC IDs (not string codes)
- *
- * @package    AioSSL\Provider
- * @author     HVN GROUP <dev@hvn.vn>
- * @copyright  2026 HVN GROUP (https://hvn.vn)
- */
 
 namespace AioSSL\Provider;
 
-use AioSSL\Core\AbstractProvider;
 use AioSSL\Core\NormalizedProduct;
 
+/**
+ * GoGetSSL Provider Implementation
+ *
+ * API Base: https://my.gogetssl.com/api/
+ * Auth: POST /auth/ → session key (401 = re-auth)
+ * Products use NUMERIC IDs (not string codes)
+ * Has sandbox: https://sandbox.gogetssl.com/api
+ *
+ * @package AioSSL\Provider
+ * @author  HVN GROUP
+ */
 class GoGetSSLProvider extends AbstractProvider
 {
-    private const API_URL = 'https://my.gogetssl.com/api';
-    private const SANDBOX_URL = 'https://sandbox.gogetssl.com/api';
+    protected string $slug    = 'gogetssl';
+    protected string $name    = 'GoGetSSL';
+    protected string $tier    = 'full';
+    protected string $baseUrl = 'https://my.gogetssl.com/api';
 
     /** @var string|null Cached auth token */
-    private $authToken = null;
+    private ?string $authToken = null;
 
-    // ─── Identity ──────────────────────────────────────────────────
-
-    public function getSlug(): string  { return 'gogetssl'; }
-    public function getName(): string  { return 'GoGetSSL'; }
-    public function getTier(): string  { return 'full'; }
-
-    public function getCapabilities(): array
-    {
-        return [
-            'order', 'reissue', 'renew', 'revoke', 'cancel', 'download',
-            'dcv_email', 'dcv_http', 'dcv_cname', 'dcv_https',
-            'validate_order', 'get_dcv_emails', 'change_dcv', 'balance',
-        ];
-    }
-
-    protected function getBaseUrl(): string
-    {
-        return ($this->apiMode === 'sandbox') ? self::SANDBOX_URL : self::API_URL;
-    }
-
-    // ─── Auth (Session-based) ──────────────────────────────────────
+    // ─── Auth ──────────────────────────────────────────────────────
 
     /**
-     * Authenticate and get session token
-     *
-     * GoGetSSL: POST /auth/ with user + pass → { "key": "xxx" }
-     * Token is cached and refreshed on 401
-     *
-     * @return string Auth token
-     * @throws \RuntimeException
+     * Authenticate with GoGetSSL API
+     * POST /auth/ → { "key": "...", "success": true }
      */
     private function authenticate(): string
     {
-        if ($this->authToken !== null) {
-            return $this->authToken;
-        }
-
-        $response = $this->httpPost($this->getBaseUrl() . '/auth/', [
+        $response = $this->httpPost($this->baseUrl . '/auth/', [
             'user' => $this->getCredential('username'),
             'pass' => $this->getCredential('password'),
         ]);
 
-        if ($response['code'] !== 200 || empty($response['decoded']['key'])) {
-            $msg = $response['decoded']['message']
-                ?? $response['decoded']['description']
-                ?? $response['decoded']['error']
-                ?? 'Authentication failed';
-            throw new \RuntimeException("GoGetSSL auth failed: {$msg}");
+        $decoded = json_decode($response['body'] ?? '', true);
+
+        if (empty($decoded['key'])) {
+            throw new \RuntimeException('GoGetSSL: Authentication failed');
         }
 
-        $this->authToken = $response['decoded']['key'];
+        $this->authToken = $decoded['key'];
         return $this->authToken;
     }
 
     /**
-     * Invalidate cached token (called on 401)
+     * Make an API call with auto-authentication and 401 retry
      */
-    private function invalidateToken(): void
+    protected function apiCall(string $endpoint, array $data = [], string $method = 'GET'): array
     {
-        $this->authToken = null;
-    }
-
-    /**
-     * Make authenticated API call with auto-retry on 401
-     *
-     * GoGetSSL passes auth_key as query parameter for GET,
-     * or as form field for POST requests.
-     *
-     * @param string $endpoint  API path (e.g. '/products/ssl/')
-     * @param array  $params    Request parameters
-     * @param string $method    HTTP method ('GET' or 'POST')
-     * @return array ['code' => int, 'body' => string, 'decoded' => array]
-     */
-    private function apiCall(string $endpoint, array $params = [], string $method = 'GET'): array
-    {
-        $maxAttempts = 2; // 1 normal + 1 retry after re-auth
-        $lastResponse = null;
-
-        for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
-            $token = $this->authenticate();
-            $url = $this->getBaseUrl() . $endpoint;
-
-            if ($method === 'GET') {
-                $params['auth_key'] = $token;
-                $lastResponse = $this->httpGet($url, $params);
-            } else {
-                $params['auth_key'] = $token;
-                $lastResponse = $this->httpPost($url, $params);
-            }
-
-            // ── FIX: Handle 401 by re-authenticating (C6) ──
-            if ($lastResponse['code'] === 401 && $attempt < $maxAttempts) {
-                $this->invalidateToken();
-                $this->log('info', 'GoGetSSL: Token expired, re-authenticating...');
-                continue;
-            }
-
-            return $lastResponse;
+        if (!$this->authToken) {
+            $this->authenticate();
         }
 
-        return $lastResponse;
+        $data['auth_key'] = $this->authToken;
+        $url = rtrim($this->baseUrl, '/') . $endpoint;
+
+        $response = ($method === 'POST')
+            ? $this->httpPost($url, $data)
+            : $this->httpGet($url, $data);
+
+        $code    = (int)($response['code'] ?? 0);
+        $decoded = json_decode($response['body'] ?? '', true);
+
+        // 401 = session expired → re-authenticate and retry once
+        if ($code === 401 || (isset($decoded['error']) && $decoded['error'] === 'auth_key_not_found')) {
+            $this->authToken = null;
+            $this->authenticate();
+            $data['auth_key'] = $this->authToken;
+
+            $response = ($method === 'POST')
+                ? $this->httpPost($url, $data)
+                : $this->httpGet($url, $data);
+
+            $code    = (int)($response['code'] ?? 0);
+            $decoded = json_decode($response['body'] ?? '', true);
+        }
+
+        return ['code' => $code, 'decoded' => $decoded, 'raw' => $response['body'] ?? ''];
     }
 
     // ─── Connection ────────────────────────────────────────────────
@@ -135,7 +89,6 @@ class GoGetSSLProvider extends AbstractProvider
     public function testConnection(): array
     {
         try {
-            $this->authenticate();
             $balance = $this->getBalance();
             return [
                 'success' => true,
@@ -159,6 +112,17 @@ class GoGetSSLProvider extends AbstractProvider
         return ['balance' => 0, 'currency' => 'USD'];
     }
 
+    // ─── Capabilities ──────────────────────────────────────────────
+
+    public function getCapabilities(): array
+    {
+        return [
+            'order', 'validate', 'status', 'download', 'reissue',
+            'renew', 'revoke', 'cancel', 'dcv_emails', 'resend_dcv',
+            'change_dcv', 'balance', 'csr_decode',
+        ];
+    }
+
     // ─── Products ──────────────────────────────────────────────────
 
     /**
@@ -168,7 +132,7 @@ class GoGetSSLProvider extends AbstractProvider
      *   GET /products/ssl/  → SSL-only products
      *   GET /products/      → All products
      *
-     * Response format:
+     * Response format from /products/ssl/:
      * {
      *   "products": [
      *     {
@@ -180,10 +144,9 @@ class GoGetSSLProvider extends AbstractProvider
      *       "multi_domain": false,
      *       "wildcard": false,
      *       "max_domains": 1,
-     *       "prices": { "1": "5.99", "2": "10.99", "3": "14.99" },
+     *       "prices": { "1": "5.99", "2": "10.99", "3": "14.99" },  ← Keys = YEARS
      *       ...
-     *     },
-     *     ...
+     *     }
      *   ]
      * }
      *
@@ -199,9 +162,7 @@ class GoGetSSLProvider extends AbstractProvider
             throw new \RuntimeException('GoGetSSL: Failed to fetch products (HTTP ' . $response['code'] . ')');
         }
 
-        $decoded = $response['decoded'];
-
-        // The reference module: $apiProducts['products']
+        $decoded     = $response['decoded'];
         $productList = $decoded['products'] ?? $decoded;
 
         if (!is_array($productList)) {
@@ -210,17 +171,15 @@ class GoGetSSLProvider extends AbstractProvider
 
         $products = [];
         foreach ($productList as $item) {
-            if (!is_array($item)) continue;
-
-            // GoGetSSL uses numeric 'id' as product identifier
-            if (!isset($item['id'])) continue;
-
+            if (!is_array($item) || !isset($item['id'])) {
+                continue;
+            }
             $products[] = $this->normalizeProduct($item);
         }
 
         $this->log('info', 'GoGetSSL: Fetched ' . count($products) . ' SSL products');
 
-        // Optionally fetch detailed pricing for all products
+        // Enrich with detailed pricing from /products/all_prices/
         $this->enrichWithPricing($products);
 
         return $products;
@@ -230,6 +189,14 @@ class GoGetSSLProvider extends AbstractProvider
      * Fetch pricing for a specific product
      *
      * GET /products/price/{product_id}/
+     *
+     * Response format:
+     * {
+     *   "product_id": 71,
+     *   "prices": { "1": "5.99", "2": "10.99", "3": "14.99" },  ← Keys = YEARS
+     *   "san_prices": { "1": "3.00", "2": "5.00" },              ← Keys = YEARS
+     *   "success": true
+     * }
      */
     public function fetchPricing(string $productCode): array
     {
@@ -237,13 +204,32 @@ class GoGetSSLProvider extends AbstractProvider
         if ($response['code'] !== 200 || !is_array($response['decoded'])) {
             return [];
         }
-        return $this->normalizePricingFromDetail($response['decoded']);
+        // /products/price/{id}/ uses YEAR-keyed format (same as product list)
+        return $this->normalizePricingFromYearKeys($response['decoded']);
     }
 
     /**
      * Enrich products with detailed pricing from /products/all_prices/
      *
-     * The reference module uses this endpoint for bulk price fetching
+     * CRITICAL FIX: The /products/all_prices/ endpoint returns a DIFFERENT format
+     * than /products/ssl/ and /products/price/{id}/
+     *
+     * /products/all_prices/ response:
+     * {
+     *   "product_prices": [
+     *     { "id": 71, "period": 12, "price": "5.99" },   ← period in MONTHS
+     *     { "id": 71, "period": 24, "price": "10.99" },
+     *     { "id": 71, "period": 36, "price": "14.99" },
+     *     { "id": 72, "period": 12, "price": "9.99" },
+     *     ...
+     *   ],
+     *   "success": true
+     * }
+     *
+     * BUG FIX #1: Previous code overwrote entries — $priceIndex[$pid] = $pp;
+     *             Only the last period per product survived.
+     * BUG FIX #2: Previous code called normalizePricingFromDetail() which expected
+     *             year-keyed 'prices' hash — but all_prices has flat {period, price}.
      */
     private function enrichWithPricing(array &$products): void
     {
@@ -254,37 +240,60 @@ class GoGetSSLProvider extends AbstractProvider
                 return;
             }
 
-            // Index prices by product ID
+            // ── FIX #1: Group ALL price entries by product ID ──
+            // Build: [ productId => [ monthPeriod => price, ... ], ... ]
             $priceIndex = [];
             foreach ($response['decoded']['product_prices'] as $pp) {
-                $pid = $pp['id'] ?? $pp['product_id'] ?? null;
-                if ($pid !== null) {
-                    $priceIndex[(int)$pid] = $pp;
+                $pid    = $pp['id'] ?? $pp['product_id'] ?? null;
+                $period = $pp['period'] ?? null;   // Already in MONTHS (12, 24, 36, ...)
+                $price  = $pp['price']  ?? null;
+
+                if ($pid === null || $period === null || $price === null) {
+                    continue;
+                }
+
+                $pid    = (int)$pid;
+                $period = (int)$period;
+
+                if (!isset($priceIndex[$pid])) {
+                    $priceIndex[$pid] = [];
+                }
+
+                // Period from all_prices is already in months — store directly
+                if ($period > 0) {
+                    $priceIndex[$pid][(string)$period] = (float)$price;
                 }
             }
 
-            // Merge pricing into products
+            // ── FIX #2: Merge grouped pricing into products (no format conversion needed) ──
             foreach ($products as &$product) {
                 if ($product instanceof NormalizedProduct) {
-                    $id = $product->extra_data['gogetssl_id'] ?? null;
+                    $id = $product->extraData['gogetssl_id'] ?? null;
                     if ($id !== null && isset($priceIndex[$id])) {
-                        $detailedPricing = $this->normalizePricingFromDetail($priceIndex[$id]);
-                        if (!empty($detailedPricing['base'])) {
-                            $product->price_data = $detailedPricing;
+                        $detailedBase = $priceIndex[$id];
+                        if (!empty($detailedBase)) {
+                            // Sort by period for consistency
+                            ksort($detailedBase, SORT_NUMERIC);
+                            $product->priceData['base'] = $detailedBase;
                         }
                     }
                 }
             }
             unset($product);
 
+            $this->log('info', 'GoGetSSL: Enriched ' . count($priceIndex) . ' products with all_prices data');
+
         } catch (\Exception $e) {
-            // Non-critical: products already have basic pricing
+            // Non-critical: products already have basic pricing from /products/ssl/
             $this->log('warning', 'GoGetSSL: Failed to enrich pricing: ' . $e->getMessage());
         }
     }
 
     // ─── Order Lifecycle ───────────────────────────────────────────
 
+    /**
+     * Validate order parameters (CSR decode)
+     */
     public function validateOrder(array $params): array
     {
         try {
@@ -292,273 +301,415 @@ class GoGetSSLProvider extends AbstractProvider
                 'csr' => $params['csr'] ?? '',
             ], 'POST');
 
-            if ($response['code'] === 200 && isset($response['decoded']['csrResult'])) {
-                return ['valid' => true, 'errors' => []];
+            if ($response['code'] === 200 && !empty($response['decoded']['csrResult'])) {
+                return [
+                    'valid'   => true,
+                    'details' => $response['decoded']['csrResult'],
+                    'errors'  => [],
+                ];
             }
-            return ['valid' => false, 'errors' => ['CSR validation failed']];
+
+            return [
+                'valid'  => false,
+                'errors' => [$response['decoded']['message'] ?? 'CSR validation failed'],
+            ];
         } catch (\Exception $e) {
             return ['valid' => false, 'errors' => [$e->getMessage()]];
         }
     }
 
+    /**
+     * Place a new SSL certificate order
+     *
+     * POST /orders/add_ssl_order/
+     */
     public function placeOrder(array $params): array
     {
-        $data = [
-            'product_id'    => $params['product_code'] ?? '',  // GoGetSSL uses numeric product_id
-            'period'        => $this->monthsToPeriod($params['period'] ?? 12),
-            'csr'           => $params['csr'] ?? '',
-            'server_count'  => -1,
-            'dcv_method'    => $this->mapDcvMethod($params['dcv_method'] ?? 'email'),
+        $apiProduct = $this->getApiProductDetails($params['product_code'] ?? '');
+        $brand = strtolower($apiProduct['brand'] ?? '');
+
+        // Brand-specific webserver_type override (from reference module)
+        $webserverType = '-1';
+        if (in_array($brand, ['geotrust', 'rapidssl', 'digicert', 'thawte'])) {
+            $webserverType = '18';
+        }
+
+        $orderData = [
+            'product_id'         => (int)$params['product_code'],
+            'period'             => $this->monthsToPeriod($params['period'] ?? 12),
+            'csr'                => $params['csr'] ?? '',
+            'server_count'       => -1,
+            'approver_email'     => $params['approver_email'] ?? '',
+            'webserver_type'     => $params['webserver_type'] ?? $webserverType,
+            'dcv_method'         => $this->mapDcvMethod($params['dcv_method'] ?? 'email'),
+            'admin_firstname'    => $params['admin_firstname'] ?? '',
+            'admin_lastname'     => $params['admin_lastname'] ?? '',
+            'admin_organization' => $params['admin_organization'] ?? '',
+            'admin_title'        => $params['admin_title'] ?? '',
+            'admin_addressline1' => $params['admin_address1'] ?? '',
+            'admin_phone'        => $params['admin_phone'] ?? '',
+            'admin_email'        => $params['admin_email'] ?? '',
+            'admin_city'         => $params['admin_city'] ?? '',
+            'admin_country'      => $params['admin_country'] ?? '',
+            'admin_postalcode'   => $params['admin_postcode'] ?? '',
+            'admin_region'       => $params['admin_state'] ?? '',
+            'tech_firstname'     => $params['tech_firstname'] ?? $params['admin_firstname'] ?? '',
+            'tech_lastname'      => $params['tech_lastname'] ?? $params['admin_lastname'] ?? '',
+            'tech_organization'  => $params['tech_organization'] ?? $params['admin_organization'] ?? '',
+            'tech_title'         => $params['tech_title'] ?? $params['admin_title'] ?? '',
+            'tech_addressline1'  => $params['tech_address1'] ?? $params['admin_address1'] ?? '',
+            'tech_phone'         => $params['tech_phone'] ?? $params['admin_phone'] ?? '',
+            'tech_email'         => $params['tech_email'] ?? $params['admin_email'] ?? '',
+            'tech_city'          => $params['tech_city'] ?? $params['admin_city'] ?? '',
+            'tech_country'       => $params['tech_country'] ?? $params['admin_country'] ?? '',
+            'tech_postalcode'    => $params['tech_postcode'] ?? $params['admin_postcode'] ?? '',
+            'tech_region'        => $params['tech_state'] ?? $params['admin_state'] ?? '',
         ];
 
-        if (isset($params['domains'])) {
-            $data['dns_names'] = is_array($params['domains'])
-                ? implode(',', $params['domains'])
-                : $params['domains'];
+        // Multi-domain: add SAN domains
+        if (!empty($params['san_domains'])) {
+            $sanDomains = is_array($params['san_domains'])
+                ? $params['san_domains']
+                : explode("\n", $params['san_domains']);
+            $orderData['dns_names'] = implode(',', array_map('trim', $sanDomains));
         }
 
-        if (isset($params['dcv_email'])) {
-            $data['approver_email'] = $params['dcv_email'];
+        $response = $this->apiCall('/orders/add_ssl_order/', $orderData, 'POST');
+
+        if ($response['code'] === 200 && !empty($response['decoded']['order_id'])) {
+            return [
+                'success'    => true,
+                'order_id'   => (string)$response['decoded']['order_id'],
+                'remote_id'  => (string)$response['decoded']['order_id'],
+                'status'     => 'Pending',
+                'message'    => 'Order placed successfully',
+            ];
         }
 
-        // Admin/tech contacts for OV/EV
-        if (isset($params['admin_contact'])) {
-            foreach ($params['admin_contact'] as $k => $v) {
-                $data['admin_' . $k] = $v;
-            }
-        }
-        if (isset($params['org_info'])) {
-            foreach ($params['org_info'] as $k => $v) {
-                $data['org_' . $k] = $v;
-            }
-        }
+        $errorMsg = $response['decoded']['message']
+            ?? $response['decoded']['description']
+            ?? 'Failed to place order';
 
-        $response = $this->apiCall('/orders/add_ssl_order/', $data, 'POST');
-
-        if ($response['code'] !== 200 || !empty($response['decoded']['error'])) {
-            $msg = $response['decoded']['message'] ?? $response['decoded']['description'] ?? 'Order failed';
-            throw new \RuntimeException("GoGetSSL placeOrder: {$msg}");
-        }
-
-        $result = $response['decoded'];
-
-        return [
-            'order_id' => (string)($result['order_id'] ?? ''),
-            'status'   => 'Pending',
-            'extra'    => $result,
-        ];
+        return ['success' => false, 'message' => $errorMsg];
     }
 
-    public function getOrderStatus(string $orderId): array
+    /**
+     * Get order status
+     *
+     * GET /orders/status/{order_id}/
+     */
+    public function getOrderStatus(string $remoteId): array
     {
-        $response = $this->apiCall('/orders/status/' . $orderId);
-
-        if ($response['code'] !== 200) {
-            throw new \RuntimeException("GoGetSSL: Failed to get status for #{$orderId}");
-        }
-
-        $data = $response['decoded'];
-
-        return [
-            'status'      => $this->normalizeStatus($data['status'] ?? ''),
-            'certificate' => $data['crt_code'] ?? null,
-            'ca_bundle'   => $data['ca_code'] ?? null,
-            'domains'     => isset($data['domain']) ? [$data['domain']] : [],
-            'begin_date'  => $data['valid_from'] ?? null,
-            'end_date'    => $data['valid_till'] ?? null,
-            'extra'       => $data,
-        ];
-    }
-
-    public function downloadCertificate(string $orderId): array
-    {
-        $response = $this->apiCall('/orders/ssl/download/' . $orderId . '/');
+        $response = $this->apiCall('/orders/status/' . $remoteId . '/');
 
         if ($response['code'] !== 200 || empty($response['decoded'])) {
-            throw new \RuntimeException('GoGetSSL: Certificate not available.');
+            return ['status' => 'Unknown', 'raw' => $response['decoded'] ?? []];
         }
 
         $data = $response['decoded'];
+
         return [
-            'certificate' => $data['crt_code'] ?? '',
-            'ca_bundle'   => $data['ca_code'] ?? '',
-            'format'      => 'pem',
+            'status'         => $this->normalizeStatus($data['status'] ?? 'unknown'),
+            'order_id'       => (string)($data['order_id'] ?? $remoteId),
+            'domain'         => $data['domain'] ?? '',
+            'valid_from'     => $data['valid_from'] ?? $data['begin_date'] ?? '',
+            'valid_to'       => $data['valid_till'] ?? $data['end_date'] ?? '',
+            'partner_order'  => $data['partner_order_id'] ?? '',
+            'ca_order_id'    => $data['ca_order_id'] ?? '',
+            'approver_email' => $data['approver_email'] ?? '',
+            'dcv_method'     => $data['dcv_method'] ?? '',
+            'san_domains'    => $data['san'] ?? [],
+            'raw'            => $data,
         ];
     }
 
-    public function reissueCertificate(string $orderId, array $params): array
+    /**
+     * Download certificate
+     *
+     * GET /orders/download/{order_id}/
+     */
+    public function downloadCertificate(string $remoteId): array
     {
-        $data = [
-            'csr'          => $params['csr'] ?? '',
-            'dcv_method'   => $this->mapDcvMethod($params['dcv_method'] ?? 'email'),
-        ];
+        $response = $this->apiCall('/orders/download/' . $remoteId . '/');
 
-        if (isset($params['dcv_email'])) {
-            $data['approver_email'] = $params['dcv_email'];
+        if ($response['code'] !== 200 || empty($response['decoded'])) {
+            return ['success' => false, 'message' => 'Failed to download certificate'];
         }
 
-        $response = $this->apiCall('/orders/ssl/reissue/' . $orderId . '/', $data, 'POST');
+        $data = $response['decoded'];
 
-        $success = ($response['code'] === 200 && empty($response['decoded']['error']));
         return [
-            'success' => $success,
-            'message' => $success ? 'Reissue initiated.' : ($response['decoded']['message'] ?? 'Failed'),
+            'success'       => true,
+            'certificate'   => $data['crt_code'] ?? '',
+            'ca_bundle'     => $data['ca_code'] ?? '',
+            'intermediate'  => $data['ca_code'] ?? '',
+            'domain'        => $data['domain'] ?? '',
         ];
     }
 
-    public function renewCertificate(string $orderId, array $params): array
+    /**
+     * Reissue certificate
+     *
+     * POST /orders/ssl/reissue/
+     */
+    public function reissueCertificate(string $remoteId, array $params): array
     {
-        $data = [
-            'product_id'   => $params['product_code'] ?? '',
-            'period'       => $this->monthsToPeriod($params['period'] ?? 12),
-            'csr'          => $params['csr'] ?? '',
-            'server_count' => -1,
-            'dcv_method'   => $this->mapDcvMethod($params['dcv_method'] ?? 'email'),
+        $reissueData = [
+            'order_id'    => (int)$remoteId,
+            'csr'         => $params['csr'] ?? '',
+            'dcv_method'  => $this->mapDcvMethod($params['dcv_method'] ?? 'email'),
         ];
 
-        if (isset($params['dcv_email'])) {
-            $data['approver_email'] = $params['dcv_email'];
+        // Brand-specific webserver_type
+        if (isset($params['webserver_type'])) {
+            $reissueData['webserver_type'] = $params['webserver_type'];
         }
 
-        $response = $this->apiCall('/orders/add_ssl_renew_order/', $data, 'POST');
-
-        if ($response['code'] !== 200 || !empty($response['decoded']['error'])) {
-            $msg = $response['decoded']['message'] ?? 'Renew failed';
-            throw new \RuntimeException("GoGetSSL renew: {$msg}");
+        if (!empty($params['approver_email'])) {
+            $reissueData['approver_email'] = $params['approver_email'];
         }
 
-        $result = $response['decoded'];
+        if (!empty($params['san_domains'])) {
+            $sanDomains = is_array($params['san_domains'])
+                ? $params['san_domains']
+                : explode("\n", $params['san_domains']);
+            $reissueData['dns_names'] = implode(',', array_map('trim', $sanDomains));
+        }
+
+        $response = $this->apiCall('/orders/ssl/reissue/', $reissueData, 'POST');
+
+        if ($response['code'] === 200 && !empty($response['decoded']['order_id'])) {
+            return [
+                'success'  => true,
+                'order_id' => (string)$response['decoded']['order_id'],
+                'message'  => 'Reissue initiated successfully',
+            ];
+        }
+
         return [
-            'order_id' => (string)($result['order_id'] ?? ''),
-            'status'   => 'Pending',
-            'extra'    => $result,
+            'success' => false,
+            'message' => $response['decoded']['message'] ?? 'Reissue failed',
         ];
     }
 
-    public function revokeCertificate(string $orderId, string $reason = ''): array
+    /**
+     * Renew certificate
+     *
+     * POST /orders/add_ssl_renew/
+     */
+    public function renewCertificate(string $remoteId, array $params): array
     {
-        $params = [];
-        if ($reason) $params['reason'] = $reason;
+        $renewData = [
+            'order_id'   => (int)$remoteId,
+            'product_id' => (int)($params['product_code'] ?? 0),
+            'period'     => $this->monthsToPeriod($params['period'] ?? 12),
+            'csr'        => $params['csr'] ?? '',
+        ];
 
-        $response = $this->apiCall('/orders/ssl/revoke/' . $orderId . '/', $params, 'POST');
-        $success = ($response['code'] === 200);
-        return ['success' => $success, 'message' => $success ? 'Revoked.' : 'Failed.'];
+        $response = $this->apiCall('/orders/add_ssl_renew/', $renewData, 'POST');
+
+        if ($response['code'] === 200 && !empty($response['decoded']['order_id'])) {
+            return [
+                'success'     => true,
+                'order_id'    => (string)$response['decoded']['order_id'],
+                'remote_id'   => (string)$response['decoded']['order_id'],
+                'message'     => 'Renewal order placed',
+            ];
+        }
+
+        return [
+            'success' => false,
+            'message' => $response['decoded']['message'] ?? 'Renewal failed',
+        ];
     }
 
-    public function cancelOrder(string $orderId): array
+    /**
+     * Revoke certificate
+     *
+     * POST /orders/cancel_ssl_order/
+     */
+    public function revokeCertificate(string $remoteId, array $params = []): array
     {
-        $response = $this->apiCall('/orders/cancel_ssl_order/' . $orderId . '/', [], 'POST');
-        $success = ($response['code'] === 200);
-        return ['success' => $success, 'message' => $success ? 'Cancelled.' : 'Failed.'];
+        $response = $this->apiCall('/orders/cancel_ssl_order/', [
+            'order_id' => (int)$remoteId,
+            'reason'   => $params['reason'] ?? 'Revoked by admin',
+        ], 'POST');
+
+        return [
+            'success' => ($response['code'] === 200 && ($response['decoded']['success'] ?? false)),
+            'message' => $response['decoded']['message'] ?? 'Revocation submitted',
+        ];
     }
 
-    // ─── DCV ───────────────────────────────────────────────────────
+    /**
+     * Cancel order
+     *
+     * POST /orders/cancel_ssl_order/
+     */
+    public function cancelOrder(string $remoteId): array
+    {
+        $response = $this->apiCall('/orders/cancel_ssl_order/', [
+            'order_id' => (int)$remoteId,
+            'reason'   => 'Cancelled by admin',
+        ], 'POST');
 
+        return [
+            'success' => ($response['code'] === 200 && ($response['decoded']['success'] ?? false)),
+            'message' => $response['decoded']['message'] ?? 'Cancellation submitted',
+        ];
+    }
+
+    /**
+     * Get available DCV (Domain Control Validation) emails
+     *
+     * POST /tools/domain/emails/
+     */
     public function getDcvEmails(string $domain): array
     {
-        $response = $this->apiCall('/tools/domain/emails/', ['domain' => $domain], 'POST');
+        $response = $this->apiCall('/tools/domain/emails/', [
+            'domain' => $domain,
+        ], 'POST');
+
         if ($response['code'] === 200 && isset($response['decoded'])) {
-            // GoGetSSL returns { "GeoTrust": [...], "Comodo": [...], ... }
-            // or flat array of emails
+            $data = $response['decoded'];
+            // Merge Comodo and GeoTrust email lists
             $emails = [];
-            $decoded = $response['decoded'];
-            if (isset($decoded['emails'])) {
-                $emails = $decoded['emails'];
-            } else {
-                foreach ($decoded as $brand => $brandEmails) {
-                    if (is_array($brandEmails)) {
-                        $emails = array_merge($emails, $brandEmails);
-                    }
-                }
+            if (!empty($data['ComodoApprovalEmails'])) {
+                $emails = array_merge($emails, (array)$data['ComodoApprovalEmails']);
+            }
+            if (!empty($data['GeotrustApprovalEmails'])) {
+                $emails = array_merge($emails, (array)$data['GeotrustApprovalEmails']);
             }
             return array_unique($emails);
+        }
+
+        return [];
+    }
+
+    /**
+     * Resend DCV email
+     *
+     * POST /orders/ssl/resend_validation_email/
+     */
+    public function resendDcvEmail(string $remoteId, array $params = []): array
+    {
+        $response = $this->apiCall('/orders/ssl/resend_validation_email/', [
+            'order_id' => (int)$remoteId,
+        ], 'POST');
+
+        return [
+            'success' => ($response['code'] === 200 && ($response['decoded']['success'] ?? false)),
+            'message' => $response['decoded']['message'] ?? 'DCV email resent',
+        ];
+    }
+
+    /**
+     * Change DCV method for an order
+     *
+     * POST /orders/ssl/change_validation_method/
+     */
+    public function changeDcvMethod(string $remoteId, array $params): array
+    {
+        $response = $this->apiCall('/orders/ssl/change_validation_method/', [
+            'order_id'       => (int)$remoteId,
+            'dcv_method'     => $this->mapDcvMethod($params['dcv_method'] ?? 'email'),
+            'approver_email' => $params['approver_email'] ?? '',
+        ], 'POST');
+
+        return [
+            'success' => ($response['code'] === 200 && ($response['decoded']['success'] ?? false)),
+            'message' => $response['decoded']['message'] ?? 'DCV method changed',
+        ];
+    }
+
+    /**
+     * Get webserver types list
+     *
+     * GET /tools/webservers/
+     */
+    public function getWebservers(): array
+    {
+        $response = $this->apiCall('/tools/webservers/');
+        if ($response['code'] === 200 && isset($response['decoded']['webservers'])) {
+            return $response['decoded']['webservers'];
         }
         return [];
     }
 
-    public function resendDcvEmail(string $orderId, string $email = ''): array
-    {
-        $response = $this->apiCall('/orders/ssl/resend_validation_email/' . $orderId . '/', [], 'POST');
-        $success = ($response['code'] === 200);
-        return ['success' => $success, 'message' => $success ? 'DCV email resent.' : 'Failed.'];
-    }
-
-    public function changeDcvMethod(string $orderId, string $method, array $params = []): array
-    {
-        $response = $this->apiCall('/orders/ssl/change_dcv_method/' . $orderId . '/', [
-            'dcv_method' => $this->mapDcvMethod($method),
-        ], 'POST');
-        $success = ($response['code'] === 200);
-        return ['success' => $success, 'message' => $success ? 'DCV method changed.' : 'Failed.'];
-    }
-
-    // ─── Helpers ───────────────────────────────────────────────────
+    // ─── Private Helpers ───────────────────────────────────────────
 
     /**
-     * Normalize product from GoGetSSL API response
+     * Get product details from API
+     */
+    private function getApiProductDetails(string $productId): array
+    {
+        $response = $this->apiCall('/products/ssl/' . $productId);
+        if ($response['code'] === 200 && is_array($response['decoded'])) {
+            return $response['decoded'];
+        }
+        return [];
+    }
+
+    /**
+     * Normalize a single product from /products/ssl/ response
      *
-     * GoGetSSL product fields:
-     * - id: 71 (numeric)
-     * - name: "Sectigo PositiveSSL DV"
-     * - brand: "Sectigo"
-     * - price: "5.99" (base price)
-     * - max_period: 3 (years)
-     * - multi_domain: bool
-     * - wildcard: bool
-     * - max_domains: int
-     * - prices: { "1": "5.99", "2": "10.99", "3": "14.99" } (price per YEAR)
+     * IMPORTANT: The 'prices' key from /products/ssl/ uses YEAR-based keys:
+     * { "1": "5.99", "2": "10.99", "3": "14.99" }
+     * We convert these to month-based keys for NormalizedProduct.
      */
     private function normalizeProduct(array $item): NormalizedProduct
     {
-        $name = $item['name'] ?? $item['product'] ?? '';
-        $nameLower = strtolower($name);
+        $name = $item['name'] ?? 'Unknown Product';
 
+        // Detect type
         $type = 'ssl';
-        if (!empty($item['wildcard']) || strpos($nameLower, 'wildcard') !== false) {
+        if (!empty($item['wildcard']) || stripos($name, 'wildcard') !== false) {
             $type = 'wildcard';
-        } elseif (!empty($item['multi_domain']) || strpos($nameLower, 'multi') !== false || strpos($nameLower, 'ucc') !== false) {
+        } elseif (!empty($item['multi_domain']) || !empty($item['is_multidomain'])) {
             $type = 'multi_domain';
-        } elseif (strpos($nameLower, 'code sign') !== false) {
-            $type = 'code_signing';
         }
 
+        // Detect validation level
         $validation = 'dv';
-        if (strpos($nameLower, ' ev') !== false || strpos($nameLower, 'extended') !== false) {
+        $nameLower  = strtolower($name);
+        if (strpos($nameLower, ' ev ') !== false || strpos($nameLower, 'extended') !== false) {
             $validation = 'ev';
-        } elseif (strpos($nameLower, ' ov') !== false || strpos($nameLower, 'organization') !== false) {
+        } elseif (strpos($nameLower, ' ov ') !== false || strpos($nameLower, 'organization') !== false) {
             $validation = 'ov';
         }
 
+        // Brand mapping
         $vendor = $item['brand'] ?? 'Unknown';
 
-        // ── FIX: Correct price parsing ──
-        // GoGetSSL 'prices' key: { "1": "5.99", "2": "10.99" } where key = years
+        // ── Pricing from /products/ssl/ — keys are YEARS ──
         $priceData = ['base' => [], 'san' => []];
 
         if (isset($item['prices']) && is_array($item['prices'])) {
             foreach ($item['prices'] as $years => $price) {
-                $months = (int)$years * 12;
-                if ($months > 0) {
+                $years = (int)$years;
+                if ($years > 0) {
+                    $months = $years * 12;
                     $priceData['base'][(string)$months] = (float)$price;
                 }
             }
         } elseif (isset($item['price'])) {
-            // Fallback: single price
+            // Fallback: single 'price' field = 1-year price
             $priceData['base']['12'] = (float)$item['price'];
         }
 
-        // SAN pricing if available
+        // SAN pricing from /products/ssl/ — also YEAR-keyed
         if (isset($item['san_prices']) && is_array($item['san_prices'])) {
             foreach ($item['san_prices'] as $years => $price) {
-                $months = (int)$years * 12;
-                if ($months > 0) {
+                $years = (int)$years;
+                if ($years > 0) {
+                    $months = $years * 12;
                     $priceData['san'][(string)$months] = (float)$price;
                 }
             }
         }
 
         return new NormalizedProduct([
-            'product_code'     => (string)$item['id'],  // ← GoGetSSL uses numeric ID
+            'product_code'     => (string)$item['id'],
             'product_name'     => $name,
             'vendor'           => $vendor,
             'validation_type'  => $validation,
@@ -570,27 +721,40 @@ class GoGetSSLProvider extends AbstractProvider
             'min_years'        => 1,
             'price_data'       => $priceData,
             'extra_data'       => [
-                'gogetssl_id'       => (int)$item['id'],
-                'brand'             => $vendor,
-                'wildcard_san'      => (bool)($item['wildcard_san_enabled'] ?? false),
+                'gogetssl_id'  => (int)$item['id'],
+                'brand'        => $vendor,
+                'wildcard_san' => (bool)($item['wildcard_san_enabled'] ?? false),
             ],
         ]);
     }
 
     /**
-     * Normalize pricing from detailed price response
-     * Used by fetchPricing() and enrichWithPricing()
+     * Normalize pricing from YEAR-keyed format
+     *
+     * Used by fetchPricing() for /products/price/{id}/ endpoint
+     * which returns: { "prices": { "1": "5.99", "2": "10.99" }, "san_prices": {...} }
      */
-    private function normalizePricingFromDetail(array $data): array
+    private function normalizePricingFromYearKeys(array $data): array
     {
         $normalized = ['base' => [], 'san' => []];
 
-        // From /products/price/{id}/ or /products/all_prices/
         if (isset($data['prices']) && is_array($data['prices'])) {
             foreach ($data['prices'] as $years => $price) {
-                $months = (int)$years * 12;
-                if ($months > 0) {
+                $years = (int)$years;
+                if ($years > 0) {
+                    $months = $years * 12;
                     $normalized['base'][(string)$months] = (float)$price;
+                }
+            }
+        }
+
+        // SAN pricing
+        if (isset($data['san_prices']) && is_array($data['san_prices'])) {
+            foreach ($data['san_prices'] as $years => $price) {
+                $years = (int)$years;
+                if ($years > 0) {
+                    $months = $years * 12;
+                    $normalized['san'][(string)$months] = (float)$price;
                 }
             }
         }
@@ -599,11 +763,15 @@ class GoGetSSLProvider extends AbstractProvider
     }
 
     /**
-     * Convert months to GoGetSSL period (years)
+     * Convert months to GoGetSSL period (years) for ordering
+     *
+     * GoGetSSL addSSLOrder expects 'period' in MONTHS (12, 24, 36...)
+     * But some older API versions expect years — handle both.
      */
     private function monthsToPeriod(int $months): int
     {
-        return max(1, (int)ceil($months / 12));
+        // GoGetSSL order API uses months directly
+        return max(12, $months);
     }
 
     /**
@@ -612,11 +780,11 @@ class GoGetSSLProvider extends AbstractProvider
     private function mapDcvMethod(string $method): string
     {
         $map = [
-            'email'    => 'EMAIL',
-            'http'     => 'HTTP',
-            'https'    => 'HTTPS',
-            'cname'    => 'CNAME_CSR_HASH',
-            'dns'      => 'CNAME_CSR_HASH',
+            'email'  => 'EMAIL',
+            'http'   => 'HTTP',
+            'https'  => 'HTTPS',
+            'cname'  => 'CNAME_CSR_HASH',
+            'dns'    => 'CNAME_CSR_HASH',
         ];
         return $map[strtolower($method)] ?? strtoupper($method);
     }
@@ -627,18 +795,18 @@ class GoGetSSLProvider extends AbstractProvider
     private function normalizeStatus(string $status): string
     {
         $map = [
-            'active'              => 'Issued',
-            'issued'              => 'Issued',
-            'processing'          => 'Processing',
-            'pending'             => 'Pending',
-            'new_order'           => 'Pending',
-            'cancelled'           => 'Cancelled',
-            'canceled'            => 'Cancelled',
-            'revoked'             => 'Revoked',
-            'expired'             => 'Expired',
-            'rejected'            => 'Rejected',
-            'incomplete'          => 'Incomplete',
-            'waiting_validation'  => 'Awaiting Validation',
+            'active'             => 'Issued',
+            'issued'             => 'Issued',
+            'processing'         => 'Processing',
+            'pending'            => 'Pending',
+            'new_order'          => 'Pending',
+            'cancelled'          => 'Cancelled',
+            'canceled'           => 'Cancelled',
+            'revoked'            => 'Revoked',
+            'expired'            => 'Expired',
+            'rejected'           => 'Rejected',
+            'incomplete'         => 'Incomplete',
+            'waiting_validation' => 'Awaiting Validation',
         ];
 
         return $map[strtolower(trim($status))] ?? $status;
