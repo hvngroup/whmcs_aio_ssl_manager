@@ -707,7 +707,7 @@ ssl2buy,ORD-456,</pre>
         AioSSL.ajax({
             page: 'import',
             action: 'fetch_orders',
-            data: { provider: bulkProvider, page: bulkCurrentPage },
+            data: { provider: bulkProvider, p: bulkCurrentPage },
             loadingMsg: 'Fetching orders from API...',
             successMessage: false,
             onSuccess: function(resp) {

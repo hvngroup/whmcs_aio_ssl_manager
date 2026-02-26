@@ -359,7 +359,7 @@ class ImportController extends BaseController
     private function fetchProviderOrders(): array
     {
         $slug   = $this->input('provider', '');
-        $page   = max(1, (int)$this->input('page', 1));
+        $page = max(1, (int)$this->input('p', 1));
         $status = $this->input('status_filter', '');
 
         if (empty($slug)) {
@@ -455,12 +455,12 @@ class ImportController extends BaseController
     private function fetchTheSSLStoreOrders($provider, int $page, int $pageSize): array
     {
         $result = $provider->queryOrder([
-            'page'      => $page - 1, // TheSSLStore uses 0-based page
+            'page'      => $page,      // 1-based, đã sửa
             'page_size' => $pageSize,
         ]);
 
         $orders = [];
-        foreach ($result as $o) {
+        foreach ($result['orders'] ?? [] as $o) {   // ← SỬA: $result['orders']
             $orders[] = [
                 'remote_id'    => (string)($o['order_id'] ?? ''),
                 'domain'       => $o['common_name'] ?? '',
@@ -472,13 +472,14 @@ class ImportController extends BaseController
             ];
         }
 
+        $total = $result['count'] ?? count($orders);
+
         return [
             'orders'      => $orders,
-            'total'       => count($orders), // TheSSLStore doesn't return total in queryOrder
-            'total_pages' => count($orders) < $pageSize ? $page : $page + 1,
+            'total'       => $total,
+            'total_pages' => $total > 0 ? max(1, (int)ceil($total / $pageSize)) : 1,
         ];
     }
-
     /**
      * SSL2Buy: POST /getorderlist with PageNo+PageSize (max 50)
      */
@@ -926,6 +927,17 @@ class ImportController extends BaseController
                 if (empty($domain) && !empty($service->domain)) {
                     $domain = $service->domain;
                 }
+            }
+        }
+
+        // SSL2Buy: store resolved brand route for future queries
+        if ($slug === 'ssl2buy') {
+            if (!empty($status['_resolved_brand_route'])) {
+                $configdata['brand_route'] = $status['_resolved_brand_route'];
+            }
+            if (!empty($status['_resolved_brand_name'])) {
+                $configdata['brand']      = $status['_resolved_brand_name'];
+                $configdata['brand_name'] = $status['_resolved_brand_name'];
             }
         }
 

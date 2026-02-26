@@ -844,11 +844,104 @@ class SSL2BuyProvider extends AbstractProvider
      */
     public function getOrderStatus(string $orderId): array
     {
-        // Brand must be resolved from order configdata or extra_data
-        // Try to load brand from stored order data
+        // Try to resolve brand from existing order data
         $brand = $this->resolveBrandFromOrder($orderId);
-        $route = $this->resolveBrandRoute($brand);
 
+        if (!empty($brand)) {
+            // Brand known → single direct call
+            return $this->queryOrderByRoute($orderId, $this->resolveBrandRoute($brand));
+        }
+
+        // Brand unknown (new import) → try all routes
+        return $this->probeAllRoutes($orderId);
+    }
+
+    /**
+     * Try all brand routes to find the order
+     *
+     * SSL2Buy has only 4 query routes. We try each one until we get
+     * StatusCode=0. This is only used for new imports where brand is unknown.
+     *
+     * Order of probing: comodo first (most common), then others.
+     *
+     * @param string $orderId
+     * @return array
+     */
+    private function probeAllRoutes(string $orderId): array
+    {
+        $routes = ['comodo', 'symantec', 'globalsign', 'prime'];
+        $lastError = '';
+
+        foreach ($routes as $route) {
+            try {
+                $response = $this->apiCall("/queryservice/{$route}/getorderdetails", [
+                    'OrderNumber' => (int)$orderId,
+                ]);
+
+                if ($response['code'] !== 200 || !isset($response['decoded'])) {
+                    $lastError = "HTTP {$response['code']} on route {$route}";
+                    continue;
+                }
+
+                $data = $response['decoded'];
+                $statusCode = (int)($data['StatusCode'] ?? -1);
+
+                // -102 = Invalid Order Number → order doesn't exist on this route
+                $errNum = $data['APIError']['ErrorNumber']
+                    ?? $data['Errors']['ErrorNumber']
+                    ?? 0;
+
+                if ($statusCode !== 0) {
+                    // Error codes that mean "order not found on this route" → try next
+                    // -100 = Generic exception (SSL2Buy returns this when order doesn't belong to route)
+                    // -102 = Invalid or missing Order Number
+                    // -105 = Invalid OrderID
+                    $skipErrors = [-100, -102, -105];
+
+                    if (in_array((int)$errNum, $skipErrors, true)) {
+                        $lastError = $this->extractApiError($data) . " (route: {$route})";
+                        continue;
+                    }
+
+                    // Real error (e.g. -101 auth failure) → stop probing
+                    $lastError = $this->extractApiError($data);
+                    break;
+                }
+
+                // SUCCESS — found the order on this route
+                $result = $this->normalizeOrderStatus($data, $route);
+
+                // Inject the resolved brand route so caller can store it
+                $result['_resolved_brand_route'] = $route;
+                $result['_resolved_brand_name']  = $this->routeToBrandName($route);
+
+                $this->log('info', "SSL2Buy: Order #{$orderId} found on route '{$route}'");
+
+                return $result;
+
+            } catch (\Exception $e) {
+                $lastError = $e->getMessage();
+                continue;
+            }
+        }
+
+        // None of the routes returned the order
+        return [
+            'success' => false,
+            'status'  => 'unknown',
+            'message' => "Order #{$orderId} not found on any SSL2Buy brand route. Last error: {$lastError}",
+        ];
+    }
+
+    /**
+     * Query order details on a specific route
+     *
+     * @param string $orderId
+     * @param string $route   Brand route slug (comodo, globalsign, symantec, prime)
+     * @return array
+     */
+    private function queryOrderByRoute(string $orderId, string $route): array
+    {
         try {
             $response = $this->apiCall("/queryservice/{$route}/getorderdetails", [
                 'OrderNumber' => (int)$orderId,
@@ -858,10 +951,7 @@ class SSL2BuyProvider extends AbstractProvider
                 $data = $response['decoded'];
                 $statusCode = (int)($data['StatusCode'] ?? -1);
 
-                // Handle API error
                 if ($statusCode !== 0) {
-                    $errNum = $data['Errors']['ErrorNumber'] ?? $data['APIError']['ErrorNumber'] ?? 0;
-                    // -102 = Invalid Order Number
                     return [
                         'success' => false,
                         'status'  => 'unknown',
@@ -869,7 +959,6 @@ class SSL2BuyProvider extends AbstractProvider
                     ];
                 }
 
-                // Normalize brand-specific response
                 return $this->normalizeOrderStatus($data, $route);
             }
 
@@ -881,60 +970,110 @@ class SSL2BuyProvider extends AbstractProvider
     }
 
     /**
+     * Map route slug back to a brand name for storage
+     *
+     * @param string $route
+     * @return string
+     */
+    private function routeToBrandName(string $route): string
+    {
+        $map = [
+            'comodo'     => 'Sectigo',
+            'globalsign' => 'GlobalSign',
+            'symantec'   => 'DigiCert',
+            'prime'      => 'PrimeSSL',
+        ];
+        return $map[$route] ?? ucfirst($route);
+    }
+
+    /**
      * Normalize brand-specific order detail response into unified format
+     *
+     * Maps SSL2Buy's varying response structures to the standard keys
+     * that ImportController and other consumers expect:
+     *   status, domains[], begin_date, end_date, product_name, product_id, extra
      */
     private function normalizeOrderStatus(array $data, string $route): array
     {
         $status = $data['OrderStatus'] ?? $data['CertificateStatus'] ?? 'unknown';
         $normalizedStatus = $this->mapStatus($status);
 
+        // ── Domains: primary + SANs ──
+        $domains = [];
+        if (!empty($data['DomainName'])) {
+            $domains[] = $data['DomainName'];
+        }
+        if (!empty($data['AdditionalDomainList'])) {
+            foreach ((array)$data['AdditionalDomainList'] as $d) {
+                $name = $d['DomainName'] ?? (is_object($d) ? ($d->DomainName ?? '') : '');
+                if (!empty($name) && !in_array($name, $domains)) {
+                    $domains[] = $name;
+                }
+            }
+        }
+
+        // ── BaseOrderDetails (nested in all brand responses) ──
+        $base = $data['BaseOrderDetails'] ?? [];
+        $productName = $base['ProductName'] ?? '';
+        $productId   = $base['ProductId'] ?? null;
+
+        // ── Build standard result ──
         $result = [
-            'success'     => true,
-            'status'      => $normalizedStatus,
-            'raw_status'  => $status,
-            'domain'      => $data['DomainName'] ?? '',
-            'start_date'  => $data['StartDate'] ?? null,
-            'end_date'    => $data['EndDate'] ?? null,
+            'success'        => true,
+            'status'         => $normalizedStatus,
+            'raw_status'     => $status,
+
+            // Standard keys expected by ImportController
+            'domains'        => $domains,
+            'domain'         => $data['DomainName'] ?? '',
+            'begin_date'     => $data['StartDate'] ?? null,
+            'end_date'       => $data['EndDate'] ?? null,
+            'product_name'   => $productName,
+            'product_id'     => $productId,
+            'serial_number'  => null, // SSL2Buy doesn't return serial in getorderdetails
+
+            // SSL2Buy-specific
+            'validity_period' => (int)($data['ValidityPeriod'] ?? 0),
+            'approver_email'  => $data['ApproverEmail'] ?? '',
+            'approval_method' => $data['ApprovalMethod'] ?? '',
+            'config_link'     => $base['ConfigurationLink'] ?? '',
+            'config_pin'      => $base['Pin'] ?? '',
+            'order_amount'    => $base['TotalAmount'] ?? $base['ProductAmount'] ?? null,
+            'year'            => $base['Year'] ?? null,
+            'san_count'       => $base['SAN'] ?? 0,
+
+            // Brand-specific vendor order ID
+            'vendor_order_id' => '',
+
+            // Extra: full raw data for resolveProductName() and raw data display
+            'extra'          => $data,
         ];
 
-        // Brand-specific fields
+        // ── Brand-specific vendor order IDs ──
         switch ($route) {
             case 'comodo':
                 $result['vendor_order_id'] = $data['ComodoOrderNumber'] ?? '';
-                $result['approver_email'] = $data['ApprovalEmail'] ?? '';
                 break;
             case 'globalsign':
-                $result['vendor_order_id'] = $data['GlobalSignOrderNumber'] ?? '';
-                $result['approver_email'] = $data['ApprovalEmail'] ?? '';
+                $result['vendor_order_id'] = $data['GlobalSignOrderID']
+                                        ?? $data['GlobalSignOrderNumber'] ?? '';
                 break;
             case 'symantec':
-                $result['vendor_order_id'] = $data['SymantecOrderNumber'] ?? $data['DigiCertOrderNumber'] ?? '';
-                $result['approver_email'] = $data['ApprovalEmail'] ?? '';
+                $result['vendor_order_id'] = $data['SymantecOrderNumber']
+                                        ?? $data['DigiCertOrderNumber']
+                                        ?? $data['DigicertOrderNumber'] ?? '';
                 break;
             case 'prime':
                 $result['vendor_order_id'] = $data['PrimeSSLOrderNumber'] ?? '';
                 break;
         }
 
-        // Admin/Tech contacts if available
-        if (isset($data['AdminContact'])) {
-            $result['admin_contact'] = $data['AdminContact'];
+        // ── Contacts (if present) ──
+        if (isset($data['ContactDetail'])) {
+            $result['contact'] = $data['ContactDetail'];
         }
-        if (isset($data['TechnicalContact'])) {
-            $result['tech_contact'] = $data['TechnicalContact'];
-        }
-        if (isset($data['OrganizationDetail'])) {
-            $result['organization'] = $data['OrganizationDetail'];
-        }
-        if (isset($data['CSRDetail'])) {
-            $result['csr_detail'] = $data['CSRDetail'];
-        }
-
-        // Additional domains
-        if (!empty($data['AdditionalDomainList'])) {
-            $result['san_domains'] = array_map(function ($d) {
-                return $d['DomainName'] ?? $d->DomainName ?? '';
-            }, (array)$data['AdditionalDomainList']);
+        if (isset($data['OrganizationDetails'])) {
+            $result['organization'] = $data['OrganizationDetails'];
         }
 
         return $result;
@@ -942,30 +1081,36 @@ class SSL2BuyProvider extends AbstractProvider
 
     /**
      * Map SSL2Buy status strings to AIO normalized status
+     *
+     * SSL2Buy API returns UPPERCASE statuses:
+     *   LINKPENDING, COMPLETED, CANCELLED, INPROCESS,
+     *   WAIT_FOR_APPROVAL, SECURITY_REVIEW
      */
     private function mapStatus(string $status): string
     {
-        $statusLower = strtolower(trim($status));
         $map = [
-            'active'                  => 'Active',
-            'issued'                  => 'Active',
-            'completed'               => 'Active',
-            'pending'                 => 'Pending',
-            'processing'              => 'Processing',
-            'awaiting configuration'  => 'Awaiting Configuration',
-            'awaiting_configuration'  => 'Awaiting Configuration',
-            'new'                     => 'Pending',
-            'cancelled'               => 'Cancelled',
-            'canceled'                => 'Cancelled',
-            'expired'                 => 'Expired',
-            'revoked'                 => 'Revoked',
-            'rejected'                => 'Cancelled',
-            'refunded'                => 'Cancelled',
+            // SSL2Buy API statuses (from API docs — uppercase)
+            'linkpending'         => 'Awaiting Configuration',
+            'completed'           => 'Active',
+            'cancelled'           => 'Cancelled',
+            'inprocess'           => 'Processing',
+            'wait_for_approval'   => 'Awaiting Validation',
+            'security_review'     => 'Processing',
+
+            // Generic aliases
+            'active'              => 'Active',
+            'issued'              => 'Active',
+            'pending'             => 'Pending',
+            'processing'          => 'Processing',
+            'expired'             => 'Expired',
+            'revoked'             => 'Revoked',
+            'rejected'            => 'Cancelled',
+            'refunded'            => 'Cancelled',
         ];
 
-        return $map[$statusLower] ?? ucfirst($status);
+        return $map[strtolower(trim($status))] ?? ucfirst(strtolower($status));
     }
-
+    
     // ═══════════════════════════════════════════════════════════════
     // ORDER LIST
     // ═══════════════════════════════════════════════════════════════
@@ -1422,43 +1567,11 @@ class SSL2BuyProvider extends AbstractProvider
 
     /**
      * Get order status with explicit brand (for internal use / sync service)
-     *
-     * When brand is known (e.g., from stored order data), use this method
-     * directly to avoid the DB lookup in resolveBrandFromOrder().
-     *
-     * @param string $orderId SSL2Buy OrderNumber
-     * @param string $brand   Brand name for routing
-     * @return array Normalized status
      */
     public function getOrderStatusWithBrand(string $orderId, string $brand): array
     {
         $route = $this->resolveBrandRoute($brand);
-
-        try {
-            $response = $this->apiCall("/queryservice/{$route}/getorderdetails", [
-                'OrderNumber' => (int)$orderId,
-            ]);
-
-            if ($response['code'] === 200 && isset($response['decoded'])) {
-                $data = $response['decoded'];
-                $statusCode = (int)($data['StatusCode'] ?? -1);
-
-                if ($statusCode !== 0) {
-                    return [
-                        'success' => false,
-                        'status'  => 'unknown',
-                        'message' => $this->extractApiError($data),
-                    ];
-                }
-
-                return $this->normalizeOrderStatus($data, $route);
-            }
-
-            return ['success' => false, 'status' => 'unknown', 'message' => 'HTTP ' . $response['code']];
-
-        } catch (\Exception $e) {
-            return ['success' => false, 'status' => 'unknown', 'message' => $e->getMessage()];
-        }
+        return $this->queryOrderByRoute($orderId, $route);
     }
 
     /**
