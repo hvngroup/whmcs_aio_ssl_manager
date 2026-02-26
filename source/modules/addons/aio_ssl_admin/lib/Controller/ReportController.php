@@ -1,6 +1,10 @@
 <?php
 /**
- * Report Controller — Revenue, product performance, expiry forecast
+ * Report Controller — 6 report types with currency-aware display
+ *
+ * Types: index, revenue, profit, products, brands, expiry
+ * All reports read from 3 tables (C4/C5) via ReportService
+ * Currency display respects Settings → Currency → Display Mode
  *
  * @package    AioSSL\Controller
  * @author     HVN GROUP <dev@hvn.vn>
@@ -9,229 +13,193 @@
 
 namespace AioSSL\Controller;
 
-use WHMCS\Database\Capsule;
+use AioSSL\Service\ReportService;
+use AioSSL\Helper\CurrencyHelper;
 
 class ReportController extends BaseController
 {
-    private $providerNames = [
-        'nicsrs' => 'NicSRS', 'gogetssl' => 'GoGetSSL',
-        'thesslstore' => 'TheSSLStore', 'ssl2buy' => 'SSL2Buy',
-    ];
+    /** @var ReportService */
+    private $reportService;
+
+    public function __construct(array $vars, array $lang)
+    {
+        parent::__construct($vars, $lang);
+        $this->reportService = new ReportService($this->currencyHelper);
+    }
+
+    // ─── Main Render ───────────────────────────────────────────────
 
     public function render(string $action = ''): void
     {
-        $type = $this->input('type', 'revenue');
-        $period = $this->input('period', '30');
+        $type    = $this->input('type', 'index');
+        $period  = $this->input('period', '30');
+        $filters = $this->getFiltersFromRequest($period);
 
-        $data = $this->getReportData($type, $period);
+        // Base vars available to ALL report templates
+        $baseVars = [
+            'reportType'   => $type,
+            'period'       => $period,
+            'filters'      => $filters,
+            'currencyInfo' => $this->currencyHelper->getInfo(),
+            'providerNames'=> [
+                'nicsrs' => 'NicSRS', 'gogetssl' => 'GoGetSSL',
+                'thesslstore' => 'TheSSLStore', 'ssl2buy' => 'SSL2Buy', 'aio' => 'AIO',
+            ],
+            'providerBadge'=> [
+                'nicsrs' => 'aio-provider-nicsrs', 'gogetssl' => 'aio-provider-gogetssl',
+                'thesslstore' => 'aio-provider-thesslstore', 'ssl2buy' => 'aio-provider-ssl2buy',
+                'aio' => 'aio-provider-aio',
+            ],
+        ];
 
-        $this->renderTemplate('reports.php', [
-            'reportType' => $type,
-            'reportData' => $data,
-            'period'     => $period,
-        ]);
+        switch ($type) {
+            case 'revenue':
+                $data = $this->prepareRevenue($filters);
+                break;
+            case 'profit':
+                $data = $this->prepareProfit($filters);
+                break;
+            case 'products':
+                $data = $this->prepareProducts($filters);
+                break;
+            case 'brands':
+                $data = $this->prepareBrands($filters);
+                break;
+            case 'expiry':
+                $data = $this->prepareExpiry($filters);
+                break;
+            default:
+                $data = $this->prepareIndex();
+                break;
+        }
+
+        $this->renderTemplate('reports.php', array_merge($baseVars, $data));
     }
+
+    // ─── AJAX Handler ──────────────────────────────────────────────
 
     public function handleAjax(string $action = ''): array
     {
         if ($action === 'export') {
-            return $this->exportCsv();
+            return $this->handleExport();
         }
         return ['success' => false, 'message' => 'Unknown action'];
     }
 
-    // ─── Data Fetchers ─────────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════════════
+    // DATA PREPARATION (per report type)
+    // ═══════════════════════════════════════════════════════════════
 
-    private function getReportData(string $type, string $period): array
+    private function prepareIndex(): array
     {
-        $dateFrom = $this->getDateFrom($period);
-
-        switch ($type) {
-            case 'revenue':
-                return $this->getRevenueData($dateFrom);
-            case 'products':
-                return $this->getProductPerformance($dateFrom);
-            case 'expiry':
-                return $this->getExpiryForecast();
-            default:
-                return [];
-        }
-    }
-
-    private function getRevenueData(?string $dateFrom): array
-    {
-        $results = [];
-        $modules = [
-            'aio_ssl' => 'aio', 'nicsrs_ssl' => 'nicsrs',
-            'SSLCENTERWHMCS' => 'gogetssl', 'thesslstore_ssl' => 'thesslstore',
-            'ssl2buy' => 'ssl2buy',
+        return [
+            'quickStats' => $this->reportService->getQuickStats(),
         ];
-
-        try {
-            $q = Capsule::table('tblsslorders')
-                ->join('tblhosting', 'tblsslorders.serviceid', '=', 'tblhosting.id')
-                ->whereIn('tblsslorders.module', array_keys($modules));
-
-            if ($dateFrom) {
-                $q->where('tblsslorders.created_at', '>=', $dateFrom);
-            }
-
-            $rows = $q->select([
-                    'tblsslorders.module',
-                    Capsule::raw('COUNT(*) as orders'),
-                    Capsule::raw('COALESCE(SUM(tblhosting.amount), 0) as revenue'),
-                ])
-                ->groupBy('tblsslorders.module')
-                ->get();
-
-            foreach ($rows as $row) {
-                $slug = $modules[$row->module] ?? $row->module;
-                $results[] = [
-                    'slug'    => $slug,
-                    'name'    => $this->providerNames[$slug] ?? ucfirst($slug),
-                    'orders'  => (int)$row->orders,
-                    'revenue' => (float)$row->revenue,
-                    'cost'    => 0, // Cost tracking requires provider price data integration
-                ];
-            }
-        } catch (\Exception $e) {
-            // Return empty
-        }
-
-        return $results;
     }
 
-    private function getProductPerformance(?string $dateFrom): array
+    private function prepareRevenue(array $filters): array
     {
-        $results = [];
-        try {
-            $q = Capsule::table('tblsslorders')
-                ->join('tblhosting', 'tblsslorders.serviceid', '=', 'tblhosting.id')
-                ->join('tblproducts', 'tblhosting.packageid', '=', 'tblproducts.id');
-
-            if ($dateFrom) {
-                $q->where('tblsslorders.created_at', '>=', $dateFrom);
-            }
-
-            $rows = $q->select([
-                    'tblproducts.name as product_name',
-                    'tblsslorders.module as provider',
-                    Capsule::raw('COUNT(*) as orders'),
-                    Capsule::raw('COALESCE(SUM(tblhosting.amount), 0) as revenue'),
-                ])
-                ->groupBy('tblproducts.name', 'tblsslorders.module')
-                ->orderBy('orders', 'desc')
-                ->limit(20)
-                ->get();
-
-            $moduleToSlug = [
-                'aio_ssl'=>'aio','nicsrs_ssl'=>'nicsrs','SSLCENTERWHMCS'=>'gogetssl',
-                'thesslstore_ssl'=>'thesslstore','ssl2buy'=>'ssl2buy',
-            ];
-
-            foreach ($rows as $row) {
-                $results[] = [
-                    'product_name' => $row->product_name,
-                    'provider'     => $moduleToSlug[$row->provider] ?? $row->provider,
-                    'orders'       => (int)$row->orders,
-                    'revenue'      => (float)$row->revenue,
-                ];
-            }
-        } catch (\Exception $e) {}
-
-        return $results;
+        return [
+            'reportData' => $this->reportService->getRevenueByProvider($filters),
+            'chartData'  => json_encode($this->reportService->getRevenueChartData($filters)),
+        ];
     }
 
-    private function getExpiryForecast(): array
+    private function prepareProfit(array $filters): array
     {
-        $results = ['7' => 0, '30' => 0, '60' => 0, '90' => 0, 'details' => []];
-        $now = date('Y-m-d');
-
-        try {
-            // Check mod_aio_ssl_orders for expiry dates in configdata
-            $orders = Capsule::table('mod_aio_ssl_orders')
-                ->whereIn('status', ['Completed', 'Issued', 'Active'])
-                ->whereNotNull('configdata')
-                ->get();
-
-            foreach ($orders as $order) {
-                $cfg = json_decode($order->configdata ?? '{}', true) ?: [];
-                $expiry = $cfg['end_date'] ?? $cfg['endDate'] ?? null;
-                if (!$expiry) continue;
-
-                $expiryTs = strtotime($expiry);
-                if (!$expiryTs || $expiryTs < time()) continue;
-
-                $daysLeft = (int)(($expiryTs - time()) / 86400);
-                if ($daysLeft > 90) continue;
-
-                if ($daysLeft <= 7) $results['7']++;
-                elseif ($daysLeft <= 30) $results['30']++;
-                elseif ($daysLeft <= 60) $results['60']++;
-                else $results['90']++;
-
-                // Gather details for first 50
-                if (count($results['details']) < 50) {
-                    $results['details'][] = [
-                        'order_id'  => $order->id,
-                        'domain'    => $cfg['domain'] ?? $order->domain ?? '—',
-                        'provider'  => $order->provider_slug ?? '',
-                        'client'    => '',
-                        'expiry'    => $expiry,
-                        'days_left' => $daysLeft,
-                    ];
-                }
-            }
-
-            // Sort details by days_left ascending
-            usort($results['details'], function ($a, $b) {
-                return $a['days_left'] - $b['days_left'];
-            });
-
-        } catch (\Exception $e) {}
-
-        return $results;
+        $groupBy = $filters['group_by'] ?? 'month';
+        return [
+            'reportData' => $this->reportService->getProfitReport($filters),
+            'chartData'  => json_encode($this->reportService->getProfitByPeriod($groupBy, $filters)),
+        ];
     }
 
-    // ─── Helpers ───────────────────────────────────────────────────
-
-    private function getDateFrom(string $period): ?string
+    private function prepareProducts(array $filters): array
     {
-        if ($period === 'all') return null;
-        $days = (int)$period ?: 30;
-        return date('Y-m-d', strtotime("-{$days} days"));
+        return [
+            'reportData' => $this->reportService->getProductPerformance($filters),
+        ];
     }
 
-    private function exportCsv(): array
+    private function prepareBrands(array $filters): array
     {
-        $type = $this->input('type', 'revenue');
-        $period = $this->input('period', '30');
-        $data = $this->getReportData($type, $period);
+        return [
+            'reportData' => $this->reportService->getRevenueByBrand($filters),
+            'chartData'  => json_encode($this->reportService->getBrandChartData($filters)),
+        ];
+    }
 
-        $csv = '';
-        if ($type === 'revenue') {
-            $csv = "Provider,Orders,Revenue,Cost,Profit,Margin%\n";
-            foreach ($data as $d) {
-                $profit = ($d['revenue'] ?? 0) - ($d['cost'] ?? 0);
-                $margin = ($d['revenue'] ?? 0) > 0 ? round($profit / $d['revenue'] * 100, 1) : 0;
-                $csv .= implode(',', [$d['name'], $d['orders'], $d['revenue'], $d['cost'], $profit, $margin]) . "\n";
-            }
-        } elseif ($type === 'products') {
-            $csv = "Product,Provider,Orders,Revenue\n";
-            foreach ($data as $d) {
-                $csv .= '"' . ($d['product_name'] ?? '') . '",' . ($d['provider'] ?? '') . ',' . ($d['orders'] ?? 0) . ',' . ($d['revenue'] ?? 0) . "\n";
-            }
-        } elseif ($type === 'expiry') {
-            $csv = "Domain,Provider,Expiry,Days Left\n";
-            foreach ($data['details'] ?? [] as $d) {
-                $csv .= implode(',', [$d['domain'], $d['provider'], $d['expiry'], $d['days_left']]) . "\n";
-            }
-        }
+    private function prepareExpiry(array $filters): array
+    {
+        return [
+            'reportData' => $this->reportService->getExpiryForecast($filters),
+        ];
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // CSV EXPORT
+    // ═══════════════════════════════════════════════════════════════
+
+    private function handleExport(): array
+    {
+        $type    = $this->input('type', 'revenue');
+        $period  = $this->input('period', '30');
+        $filters = $this->getFiltersFromRequest($period);
+
+        $result = $this->reportService->exportCsv($type, $filters);
 
         return [
             'success'  => true,
-            'csv'      => $csv,
-            'filename' => "aio_ssl_{$type}_{$period}d_" . date('Ymd') . '.csv',
+            'csv'      => $result['csv'],
+            'filename' => $result['filename'],
         ];
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // FILTER EXTRACTION
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * Extract and validate filters from GET/POST
+     */
+    private function getFiltersFromRequest(string $period = '30'): array
+    {
+        $filters = [];
+
+        // Period → date_from
+        if ($period !== 'all') {
+            $days = (int)$period ?: 30;
+            $filters['date_from'] = date('Y-m-d', strtotime("-{$days} days"));
+        }
+
+        // Explicit date range (overrides period)
+        $dateFrom = $this->input('date_from');
+        if ($dateFrom && preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateFrom)) {
+            $filters['date_from'] = $dateFrom;
+        }
+        $dateTo = $this->input('date_to');
+        if ($dateTo && preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateTo)) {
+            $filters['date_to'] = $dateTo;
+        }
+
+        // Provider filter
+        $provider = $this->input('provider');
+        if ($provider && preg_match('/^[a-z0-9_]+$/', $provider)) {
+            $filters['provider'] = $provider;
+        }
+
+        // Status filter
+        $status = $this->input('status');
+        if ($status) {
+            $filters['status'] = $status;
+        }
+
+        // Group by (for charts)
+        $groupBy = $this->input('group_by');
+        if ($groupBy && in_array($groupBy, ['day', 'week', 'month', 'quarter', 'year'])) {
+            $filters['group_by'] = $groupBy;
+        }
+
+        return $filters;
     }
 }
