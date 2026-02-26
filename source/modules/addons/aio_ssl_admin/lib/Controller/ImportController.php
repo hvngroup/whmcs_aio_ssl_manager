@@ -402,7 +402,7 @@ class ImportController extends BaseController
      */
     private function fetchOrdersByProvider($provider, string $slug, int $page, string $statusFilter): array
     {
-        $pageSize = 50;
+        $pageSize = 500;
 
         switch ($slug) {
             case 'gogetssl':
