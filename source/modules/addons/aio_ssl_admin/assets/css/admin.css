@@ -593,7 +593,6 @@ textarea.aio-form-control {
 .aio-info-item .aio-code {
     font-family: 'SFMono-Regular', Consolas, monospace;
     font-size: 12px;
-    background: var(--aio-bg);
     padding: 2px 6px;
     border-radius: 3px;
 }
@@ -886,6 +885,567 @@ textarea.aio-form-control {
 .aio-footer a {
     color: var(--aio-primary);
     text-decoration: none;
+}
+
+
+/* ══════════════════════════════════════════════════════════════
+   ORDER DETAIL — Section-based Layout
+   Append this block to the end of admin.css
+   ══════════════════════════════════════════════════════════════ */
+
+/* ── Breadcrumb ── */
+.aio-breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--aio-text-secondary);
+    margin-bottom: 12px;
+}
+.aio-breadcrumb a {
+    color: var(--aio-text-secondary);
+    text-decoration: none;
+}
+.aio-breadcrumb a:hover {
+    color: var(--aio-primary);
+}
+.aio-breadcrumb .fas {
+    font-size: 8px;
+    color: var(--aio-border);
+}
+.aio-breadcrumb span {
+    color: var(--aio-heading);
+    font-weight: 500;
+}
+
+/* ── Detail Header ── */
+.aio-detail-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    background: var(--aio-white);
+    border: 1px solid var(--aio-border);
+    border-radius: var(--aio-radius);
+    padding: 16px 20px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+    gap: 12px;
+    box-shadow: var(--aio-shadow);
+}
+.aio-detail-header-left {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+}
+.aio-detail-header-info {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.aio-detail-title {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--aio-heading);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    line-height: 1.3;
+}
+.aio-detail-domain {
+    font-family: 'SFMono-Regular', Consolas, monospace;
+    font-size: 14px;
+    color: var(--aio-text-secondary);
+    font-weight: 400;
+}
+.aio-detail-badges {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+}
+.aio-detail-meta {
+    font-size: 12px;
+    color: var(--aio-text-secondary);
+}
+.aio-detail-header-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+/* ── Sections ── */
+.aio-section {
+    margin-bottom: 24px;
+}
+.aio-section-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--aio-heading);
+    margin: 0 0 12px 0;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    line-height: 1.4;
+}
+.aio-section-title .fas,
+.aio-section-title .fab {
+    color: var(--aio-primary);
+    font-size: 14px;
+}
+
+/* ── Grid 2-col equal (override existing 2fr/1fr for detail page) ── */
+.aio-section > .aio-grid-2 {
+    grid-template-columns: 1fr 1fr;
+}
+
+/* ── Grid 3-col ── */
+.aio-grid-3 {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 16px;
+}
+@media (max-width: 1100px) {
+    .aio-grid-3 {
+        grid-template-columns: 1fr 1fr;
+    }
+}
+@media (max-width: 768px) {
+    .aio-grid-3 {
+        grid-template-columns: 1fr;
+    }
+    .aio-section > .aio-grid-2 {
+        grid-template-columns: 1fr;
+    }
+    .aio-detail-header {
+        flex-direction: column;
+    }
+    .aio-detail-header-actions {
+        width: 100%;
+    }
+}
+
+/* ── Info Row layout (detail page rows: label/value pairs) ── */
+.aio-info-row {
+    display: flex;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--aio-border-light);
+    font-size: 12.5px;
+    line-height: 1.5;
+}
+.aio-info-row:last-child {
+    border-bottom: none;
+}
+.aio-info-row > label {
+    width: 120px;
+    flex-shrink: 0;
+    color: var(--aio-text-secondary);
+    font-weight: 500;
+    margin: 0;
+    font-size: 12px;
+}
+.aio-info-row > span {
+    color: var(--aio-heading);
+    word-break: break-word;
+    flex: 1;
+    min-width: 0;
+}
+
+/* When .aio-info-grid is used as list of rows (not the grid variant) */
+.aio-card-body > .aio-info-grid {
+    display: flex;
+    flex-direction: column;
+}
+
+/* ── Code style ── */
+.aio-code {
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 12px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    color: var(--aio-heading);
+}
+
+/* ── Text utility classes ── */
+.aio-text-muted    { color: var(--aio-text-secondary) !important; }
+.aio-text-primary  { color: var(--aio-primary) !important; }
+.aio-text-success  { color: var(--aio-success) !important; }
+.aio-text-warning  { color: var(--aio-warning) !important; }
+.aio-text-danger   { color: var(--aio-danger) !important; }
+
+/* ── Link styles ── */
+.aio-link {
+    color: var(--aio-primary);
+    text-decoration: none;
+}
+.aio-link:hover {
+    color: var(--aio-primary-hover);
+    text-decoration: underline;
+}
+
+/* ── Validity Progress Bar ── */
+.aio-validity-bar {
+    padding: 8px 0;
+}
+.aio-validity-label {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11px;
+    color: var(--aio-text-secondary);
+    margin-bottom: 4px;
+}
+.aio-validity-label:last-child {
+    margin-bottom: 0;
+    margin-top: 4px;
+}
+.aio-progress {
+    width: 100%;
+    height: 8px;
+    background: var(--aio-border-light);
+    border-radius: 4px;
+    overflow: hidden;
+}
+.aio-progress-bar {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.4s ease;
+}
+.aio-progress-success { background: var(--aio-success); }
+.aio-progress-warning { background: var(--aio-warning); }
+.aio-progress-danger  { background: var(--aio-danger); }
+
+/* ── Quick Stats Mini ── */
+.aio-stats-mini {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+.aio-stat-mini {
+    padding: 10px 12px;
+    border: 1px solid var(--aio-border-light);
+    border-radius: var(--aio-radius-sm);
+    text-align: center;
+}
+.aio-stat-mini-value {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--aio-heading);
+    line-height: 1.3;
+}
+.aio-stat-mini-label {
+    font-size: 11px;
+    color: var(--aio-text-secondary);
+    margin-top: 2px;
+}
+.aio-stat-mini.aio-stat-danger {
+    border-color: #ffccc7;
+    background: var(--aio-danger-bg);
+}
+.aio-stat-mini.aio-stat-danger .aio-stat-mini-value {
+    color: var(--aio-danger);
+}
+.aio-stat-mini.aio-stat-warning {
+    border-color: #ffe58f;
+    background: var(--aio-warning-bg);
+}
+.aio-stat-mini.aio-stat-warning .aio-stat-mini-value {
+    color: #d48806;
+}
+
+/* ── Form Grid (edit mode) ── */
+.aio-form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+.aio-form-grid .aio-form-group {
+    margin-bottom: 0;
+}
+.aio-form-grid .aio-form-group label {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--aio-text-secondary);
+    margin-bottom: 4px;
+    display: block;
+}
+@media (max-width: 768px) {
+    .aio-form-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* ── Download Grid ── */
+.aio-download-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 8px;
+}
+.aio-download-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 14px 10px;
+    border: 1px solid var(--aio-border);
+    border-radius: var(--aio-radius);
+    background: var(--aio-bg-light);
+    cursor: pointer;
+    transition: var(--aio-transition);
+    text-align: center;
+    font-size: 12px;
+    color: var(--aio-text);
+}
+.aio-download-card:hover {
+    border-color: var(--aio-primary);
+    background: var(--aio-primary-bg);
+    box-shadow: 0 2px 8px rgba(24, 144, 255, 0.12);
+}
+.aio-download-card strong {
+    font-weight: 600;
+    color: var(--aio-heading);
+    font-size: 12px;
+}
+.aio-download-card small {
+    color: var(--aio-text-secondary);
+    font-size: 11px;
+}
+
+/* ── Collapsible section ── */
+.aio-section-collapsible {
+    border: 1px solid var(--aio-primary);
+    border-radius: var(--aio-radius);
+}
+.aio-collapse-icon {
+    transition: transform 0.2s ease;
+    font-size: 11px;
+    color: var(--aio-text-secondary);
+}
+
+/* ── DCV Instruction Rows ── */
+.aio-dcv-detail-row > td {
+    padding: 0 12px 12px !important;
+    background: var(--aio-bg-light);
+    border-bottom: 1px solid var(--aio-border-light);
+}
+.aio-dcv-instructions {
+    padding: 8px 0;
+}
+.aio-dcv-block {
+    font-size: 12px;
+    color: var(--aio-text);
+    line-height: 1.6;
+}
+.aio-dcv-block strong {
+    color: var(--aio-heading);
+    font-size: 12px;
+    display: block;
+    margin-bottom: 6px;
+}
+.aio-dcv-detail {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+    flex-wrap: wrap;
+}
+.aio-dcv-detail label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--aio-text-secondary);
+    min-width: 90px;
+    margin: 0;
+}
+.aio-dcv-detail code {
+    font-family: 'SFMono-Regular', Consolas, monospace;
+    font-size: 11px;
+    background: var(--aio-white);
+    border: 1px solid var(--aio-border);
+    padding: 2px 8px;
+    border-radius: 3px;
+    color: var(--aio-heading);
+    flex: 1;
+    min-width: 0;
+    word-break: break-all;
+}
+
+/* ── Action Buttons List ── */
+.aio-action-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.aio-action-btn {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    border: 1px solid var(--aio-border-light);
+    border-radius: var(--aio-radius-sm);
+    background: var(--aio-white);
+    cursor: pointer;
+    transition: var(--aio-transition);
+    text-align: left;
+    width: 100%;
+    font-size: 12px;
+    color: var(--aio-text);
+}
+.aio-action-btn:hover {
+    border-color: var(--aio-primary);
+    background: var(--aio-primary-bg);
+}
+.aio-action-btn > i {
+    font-size: 16px;
+    width: 20px;
+    text-align: center;
+    flex-shrink: 0;
+}
+.aio-action-btn > div {
+    flex: 1;
+    min-width: 0;
+}
+.aio-action-btn > div strong {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--aio-heading);
+    line-height: 1.3;
+}
+.aio-action-btn > div small {
+    font-size: 11px;
+    color: var(--aio-text-secondary);
+}
+.aio-action-btn.aio-action-danger {
+    border-color: #ffccc7;
+}
+.aio-action-btn.aio-action-danger:hover {
+    border-color: var(--aio-danger);
+    background: var(--aio-danger-bg);
+}
+.aio-action-btn.aio-action-danger > i {
+    color: var(--aio-danger);
+}
+.aio-action-btn:disabled,
+.aio-action-btn.disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+/* ── Modal — Order Detail variant (uses .aio-modal-overlay + .aio-modal-content) ──
+   NOTE: existing modals use .aio-modal-backdrop > .aio-modal pattern.
+   This variant is scoped so it does NOT break existing modals. ── */
+.aio-modal-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.45);
+}
+.aio-modal-content {
+    position: relative;
+    background: var(--aio-white);
+    border-radius: var(--aio-radius);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+    width: 480px;
+    max-width: 90vw;
+    max-height: 80vh;
+    overflow-y: auto;
+    z-index: 1;
+}
+.aio-modal-content .aio-modal-header {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--aio-border-light);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.aio-modal-content .aio-modal-header h4 {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--aio-heading);
+    margin: 0;
+}
+.aio-modal-content .aio-modal-body {
+    padding: 20px;
+    font-size: 13px;
+    color: var(--aio-text);
+}
+.aio-modal-content .aio-modal-footer {
+    padding: 12px 20px;
+    border-top: 1px solid var(--aio-border-light);
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+}
+
+/* When .aio-modal is used directly as flex overlay container (Order Detail modals) */
+#actionModal,
+#dcvModal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 10001;
+    align-items: center;
+    justify-content: center;
+}
+
+/* .aio-btn-danger already defined in base admin.css */
+
+/* ── Form label utility ── */
+.aio-form-label {
+    display: block;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--aio-text);
+    margin-bottom: 4px;
+}
+
+/* ── Activity Log table refinements ── */
+.aio-section .aio-table tbody td {
+    font-size: 12px;
+}
+.aio-section .aio-table thead th {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    color: var(--aio-text-secondary);
+}
+
+/* ── Provider badge in quick stats ── */
+.aio-stat-mini .aio-provider-badge {
+    font-size: 11px;
+}
+.aio-stat-mini .aio-badge {
+    font-size: 10px;
+}
+
+/* ── Scrollable card for activity logs ── */
+.aio-section .aio-card-body[style*="padding:0"] .aio-table-wrapper {
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+/* ── Print styles ── */
+@media print {
+    .aio-detail-header-actions,
+    .aio-download-grid,
+    .aio-action-list button,
+    .aio-modal {
+        display: none !important;
+    }
+    .aio-detail-header {
+        box-shadow: none;
+        border: 1px solid #ccc;
+    }
+    .aio-card {
+        box-shadow: none;
+        break-inside: avoid;
+    }
 }
 
 /* ══════════════════════════════════════════════════════════════

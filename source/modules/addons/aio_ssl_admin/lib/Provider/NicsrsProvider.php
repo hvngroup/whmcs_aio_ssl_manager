@@ -260,22 +260,58 @@ class NicsrsProvider extends AbstractProvider
 
     public function getOrderStatus(string $orderId): array
     {
-        $response = $this->apiCall('/collect', ['cert_id' => $orderId]);
+        $response = $this->apiCall('/collect', ['certId' => $orderId]);
 
-        if ($response['code'] !== 200 || ($response['decoded']['code'] ?? null) != 1) {
-            throw new \RuntimeException("NicSRS: Failed to get status for #{$orderId}");
+        if ($response['code'] !== 200) {
+            throw new \RuntimeException("NicSRS: HTTP error {$response['code']} for #{$orderId}");
         }
 
+        $apiCode = (int)($response['decoded']['code'] ?? -1);
+
+        // Code 2 = certificate still being issued/processing — NOT an error
+        // Reference: NicsrsApiService::getResponseCodeDescription(2)
+        //   → "Certificate being issued, retry later"
+        if ($apiCode === 2) {
+            return [
+                'status'         => 'Pending',
+                'certificate'    => null,
+                'ca_bundle'      => null,
+                'domains'        => [],
+                'begin_date'     => null,
+                'end_date'       => null,
+                'serial_number'  => null,
+                'vendor_id'      => null,
+                'vendor_cert_id' => null,
+                'extra'          => $response['decoded']['data'] ?? [],
+            ];
+        }
+
+        // Any code other than 1 = real error
+        if ($apiCode !== 1) {
+            $msg = $response['decoded']['msg'] ?? 'Unknown error';
+            throw new \RuntimeException("NicSRS: {$msg} (code: {$apiCode}) for #{$orderId}");
+        }
+
+        // Code 1 = success — parse data
         $data = $response['decoded']['data'] ?? [];
 
+        // Status can be in data.status or top-level response.status
+        $status = $data['status']
+            ?? $response['decoded']['status']
+            ?? $response['decoded']['certStatus']
+            ?? '';
+
         return [
-            'status'      => $this->normalizeStatus($data['status'] ?? ''),
-            'certificate' => $data['certificate'] ?? null,
-            'ca_bundle'   => $data['ca_bundle'] ?? $data['caBundle'] ?? null,
-            'domains'     => isset($data['domain']) ? [$data['domain']] : [],
-            'begin_date'  => $data['begin_date'] ?? $data['beginDate'] ?? null,
-            'end_date'    => $data['end_date'] ?? $data['endDate'] ?? null,
-            'extra'       => $data,
+            'status'         => $this->normalizeStatus($status),
+            'certificate'    => $data['certificate'] ?? null,
+            'ca_bundle'      => $data['ca_bundle'] ?? $data['caBundle'] ?? $data['caCertificate'] ?? null,
+            'domains'        => isset($data['domain']) ? [$data['domain']] : [],
+            'begin_date'     => $data['beginDate'] ?? $data['begin_date'] ?? null,
+            'end_date'       => $data['endDate'] ?? $data['end_date'] ?? null,
+            'serial_number'  => $data['serialNumber'] ?? $data['serial_number'] ?? null,
+            'vendor_id'      => $data['vendorId'] ?? null,
+            'vendor_cert_id' => $data['vendorCertId'] ?? null,
+            'extra'          => $data,
         ];
     }
 
