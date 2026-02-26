@@ -49,6 +49,104 @@ class ImportController extends BaseController
         'ssl2buy',
     ];
 
+    /**
+     * Resolve product name from provider status response
+     *
+     * Each provider returns product info differently:
+     *   - NicSRS:       extra['productType'] (e.g. "Sectigo PositiveSSL")
+     *   - TheSSLStore:  product_name / ProductName (from API directly)
+     *   - SSL2Buy:      extra['ProductName'] / extra['product_name']
+     *   - GoGetSSL:     product_id only (numeric) — must lookup from mod_aio_ssl_products
+     *
+     * Fallback chain:
+     *   1. Direct keys in status response (product_name, ProductName, etc.)
+     *   2. extra['productType'] / extra['ProductName'] / extra['product_name']
+     *   3. DB lookup by product_id + provider_slug from mod_aio_ssl_products
+     *   4. 'Unknown'
+     *
+     * @param string $slug     Provider slug (gogetssl, thesslstore, nicsrs, ssl2buy)
+     * @param array  $status   Response from provider->getOrderStatus()
+     * @return string
+     */
+    private function resolveProductName(string $slug, array $status): string
+    {
+        // 1) Direct keys from provider response
+        $directKeys = ['product_name', 'ProductName', 'productType', 'product_type'];
+        foreach ($directKeys as $key) {
+            if (!empty($status[$key]) && $status[$key] !== 'Unknown') {
+                return $status[$key];
+            }
+        }
+
+        // 2) From extra/raw arrays
+        $extraArrays = ['extra', 'raw'];
+        $extraKeys   = ['productType', 'ProductName', 'product_name', 'product_type', 'product'];
+        foreach ($extraArrays as $arr) {
+            if (!empty($status[$arr]) && is_array($status[$arr])) {
+                foreach ($extraKeys as $key) {
+                    if (!empty($status[$arr][$key])) {
+                        return $status[$arr][$key];
+                    }
+                }
+            }
+        }
+
+        // 3) GoGetSSL-specific: resolve product_id → product_name from DB
+        if (!empty($status['product_id'])) {
+            try {
+                $product = Capsule::table('mod_aio_ssl_products')
+                    ->where('provider_slug', $slug)
+                    ->where('product_code', (string)$status['product_id'])
+                    ->value('product_name');
+
+                if (!empty($product)) {
+                    return $product;
+                }
+            } catch (\Exception $e) {
+                // Silent — fallback to Unknown
+            }
+        }
+
+        return 'Unknown';
+    }
+
+    /**
+     * Extract domains from provider status response (normalized)
+     *
+     * Each provider returns domains differently:
+     *   - NicSRS/TheSSLStore/SSL2Buy: domains[] array
+     *   - GoGetSSL: domain (string) + san_domains[] array
+     *
+     * @param array $status Response from provider->getOrderStatus()
+     * @return array
+     */
+    private function extractDomains(array $status): array
+    {
+        // Standard domains array
+        if (!empty($status['domains']) && is_array($status['domains'])) {
+            return $status['domains'];
+        }
+
+        $domains = [];
+
+        // GoGetSSL: domain (string) + san_domains
+        if (!empty($status['domain'])) {
+            $domains[] = $status['domain'];
+        }
+
+        // GoGetSSL san_domains (array of arrays or strings)
+        if (!empty($status['san_domains']) && is_array($status['san_domains'])) {
+            foreach ($status['san_domains'] as $san) {
+                $d = is_array($san) ? ($san['san_name'] ?? '') : (string)$san;
+                if (!empty($d) && !in_array($d, $domains)) {
+                    $domains[] = $d;
+                }
+            }
+        }
+
+        return $domains;
+    }
+
     // ─── Routing ───────────────────────────────────────────────────
 
     public function render(string $action = ''): void
@@ -123,7 +221,6 @@ class ImportController extends BaseController
         }
 
         // Check if already imported in AIO
-        // NOTE: mod_aio_ssl_orders uses `remote_id` (with underscore)
         $existing = Capsule::table('mod_aio_ssl_orders')
             ->where('remote_id', $remoteId)
             ->where('provider_slug', $slug)
@@ -141,6 +238,29 @@ class ImportController extends BaseController
             $provider = ProviderRegistry::get($slug);
             $status   = $provider->getOrderStatus($remoteId);
 
+            // Resolve product name (works for all providers including GoGetSSL)
+            $productName = $this->resolveProductName($slug, $status);
+
+            // Extract domains (normalized across providers)
+            $domains = $this->extractDomains($status);
+
+            // Build raw data for debugging (exclude sensitive fields)
+            $rawData = $status;
+            $sensitiveKeys = ['csr_code', 'crt_code', 'ca_code', 'certificate', 'ca_bundle', 'raw'];
+            foreach ($sensitiveKeys as $sk) {
+                if (isset($rawData[$sk])) {
+                    $rawData[$sk] = !empty($rawData[$sk]) ? '[present]' : null;
+                }
+            }
+            // Also sanitize nested raw array
+            if (isset($rawData['raw']) && is_array($rawData['raw'])) {
+                foreach (['csr_code', 'crt_code', 'ca_code'] as $sk) {
+                    if (isset($rawData['raw'][$sk])) {
+                        $rawData['raw'][$sk] = !empty($rawData['raw'][$sk]) ? '[present]' : null;
+                    }
+                }
+            }
+
             return [
                 'success'     => true,
                 'certificate' => [
@@ -148,16 +268,14 @@ class ImportController extends BaseController
                     'provider'       => $slug,
                     'provider_name'  => self::PROVIDER_NAMES[$slug] ?? ucfirst($slug),
                     'status'         => $status['status'] ?? 'Unknown',
-                    'domains'        => $status['domains'] ?? [],
-                    'begin_date'     => $status['begin_date'] ?? null,
-                    'end_date'       => $status['end_date'] ?? null,
+                    'domains'        => $domains,
+                    'begin_date'     => $status['begin_date'] ?? $status['valid_from'] ?? null,
+                    'end_date'       => $status['end_date'] ?? $status['valid_to'] ?? null,
                     'serial_number'  => $status['serial_number'] ?? null,
-                    'has_cert'       => !empty($status['certificate']),
-                    'product_type'   => $status['extra']['productType']
-                                        ?? $status['extra']['ProductName']
-                                        ?? $status['extra']['product_name']
-                                        ?? 'Unknown',
-                    'extra'          => $status['extra'] ?? [],
+                    'has_cert'       => !empty($status['certificate']) || !empty($status['crt_code']),
+                    'product_name'   => $productName,
+                    'product_id'     => $status['product_id'] ?? null,
+                    'raw_data'       => $rawData,
                 ],
             ];
         } catch (\Exception $e) {
@@ -726,7 +844,14 @@ class ImportController extends BaseController
             }
         }
 
-        return ['claimed' => $claimed, 'failed' => $failed, 'total' => $claimed + $failed];
+        return [
+            'success' => true,
+            'message' => "Claimed {$claimed} of " . ($claimed + $failed) . " orders" 
+                        . ($failed > 0 ? " ({$failed} failed)" : ''),
+            'claimed' => $claimed, 
+            'failed'  => $failed, 
+            'total'   => $claimed + $failed,
+        ];
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -763,15 +888,15 @@ class ImportController extends BaseController
      */
     private function createAioOrder(string $slug, string $remoteId, array $status, int $serviceId = 0): int
     {
-        // Extract domain from status
-        $domains = $status['domains'] ?? [];
+        // Extract domains (normalized)
+        $domains = $this->extractDomains($status);
         $domain  = !empty($domains) ? $domains[0] : '';
 
-        // Extract cert type
-        $certType = $status['extra']['productType']
-                    ?? $status['extra']['ProductName']
-                    ?? $status['extra']['product_name']
-                    ?? 'imported';
+        // Resolve product name/type using unified helper
+        $certType = $this->resolveProductName($slug, $status);
+        if ($certType === 'Unknown') {
+            $certType = 'imported';
+        }
 
         // Normalize status for AIO
         $normalizedStatus = $this->normalizeImportStatus($status['status'] ?? 'Unknown');
@@ -784,12 +909,12 @@ class ImportController extends BaseController
             'imported_by'    => $_SESSION['adminid'] ?? 0,
             'import_source'  => 'api',
             'domains'        => $domains,
-            'begin_date'     => $status['begin_date'] ?? null,
-            'end_date'       => $status['end_date'] ?? null,
+            'begin_date'     => $status['begin_date'] ?? $status['valid_from'] ?? null,
+            'end_date'       => $status['end_date'] ?? $status['valid_to'] ?? null,
             'serial_number'  => $status['serial_number'] ?? null,
-            'csr'            => $status['extra']['csr_code'] ?? $status['extra']['csr'] ?? null,
-            'cert'           => $status['certificate'] ?? null,
-            'ca_bundle'      => $status['ca_bundle'] ?? null,
+            'csr'            => $status['csr_code'] ?? $status['extra']['csr_code'] ?? $status['extra']['csr'] ?? null,
+            'cert'           => $status['certificate'] ?? $status['crt_code'] ?? null,
+            'ca_bundle'      => $status['ca_bundle'] ?? $status['ca_code'] ?? null,
         ];
 
         // Resolve userid from service if linked
@@ -804,12 +929,6 @@ class ImportController extends BaseController
             }
         }
 
-        // mod_aio_ssl_orders schema: NO `module` column.
-        // Columns: userid, service_id, provider_slug, remote_id, canonical_id,
-        //          product_code, domain, certtype, status, configdata,
-        //          completiondate, begin_date, end_date,
-        //          legacy_table, legacy_order_id, legacy_module,
-        //          created_at, updated_at
         $orderId = Capsule::table('mod_aio_ssl_orders')->insertGetId([
             'userid'        => $userId,
             'service_id'    => $serviceId ?: 0,
@@ -819,8 +938,8 @@ class ImportController extends BaseController
             'product_code'  => $certType,
             'domain'        => $domain ?: '',
             'status'        => $normalizedStatus,
-            'begin_date'    => $status['begin_date'] ?? null,
-            'end_date'      => $status['end_date'] ?? null,
+            'begin_date'    => $status['begin_date'] ?? $status['valid_from'] ?? null,
+            'end_date'      => $status['end_date'] ?? $status['valid_to'] ?? null,
             'configdata'    => json_encode($configdata, JSON_UNESCAPED_UNICODE),
             'created_at'    => date('Y-m-d H:i:s'),
             'updated_at'    => date('Y-m-d H:i:s'),

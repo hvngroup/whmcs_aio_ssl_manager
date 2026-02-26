@@ -508,20 +508,90 @@ ssl2buy,ORD-456,</pre>
         });
     });
 
+    /**
+     * ============================================================
+     * Replace the entire renderPreview() function and add helpers
+     * inside the existing IIFE block in import.php <script>
+     * 
+     * Place these INSIDE the (function($) { 'use strict'; ... })(jQuery);
+     * ============================================================
+     */
+
+    // ── Raw data helpers (scoped inside IIFE) ──────────────────
+
+    function syntaxHighlight(obj) {
+        var json = JSON.stringify(obj, null, 2);
+        if (!json) return '';
+
+        json = json.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+        return json.replace(
+            /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g,
+            function(match) {
+                var cls = '#fab387'; // number (peach)
+                if (/^"/.test(match)) {
+                    if (/:$/.test(match)) {
+                        cls = '#89b4fa'; // key (blue)
+                        match = match.replace(/:$/, '');
+                        return '<span style="color:' + cls + '">' + match + '</span>:';
+                    } else {
+                        cls = '#a6e3a1'; // string (green)
+                    }
+                } else if (/true|false/.test(match)) {
+                    cls = '#f38ba8'; // boolean (red)
+                } else if (/null/.test(match)) {
+                    cls = '#9399b2'; // null (gray)
+                }
+                return '<span style="color:' + cls + '">' + match + '</span>';
+            }
+        );
+    }
+
+    function normalizeStatusClass(status) {
+        if (!status) return '';
+        var s = status.toLowerCase();
+        var map = {
+            'active': 'aio-status-active',
+            'issued': 'aio-status-active',
+            'processing': 'aio-status-pending',
+            'pending': 'aio-status-pending',
+            'awaiting validation': 'aio-status-pending',
+            'awaiting configuration': 'aio-status-pending',
+            'cancelled': 'aio-status-cancelled',
+            'canceled': 'aio-status-cancelled',
+            'expired': 'aio-status-expired',
+            'revoked': 'aio-status-cancelled',
+            'rejected': 'aio-status-cancelled',
+            'incomplete': 'aio-status-expiring',
+            'unpaid': 'aio-status-expiring',
+        };
+        return map[s] || '';
+    }
+
+    // Store raw data reference inside IIFE scope
+    var _rawDataCache = null;
+
     function renderPreview(cert) {
         if (!cert) return;
+
+        var productDisplay = cert.product_name || cert.product_type || 'Unknown';
+        if (cert.product_id && productDisplay !== 'Unknown') {
+            productDisplay += ' <span style="color:var(--aio-text-secondary);font-size:11px;">(ID: ' + AioSSL.escHtml(String(cert.product_id)) + ')</span>';
+        }
 
         var html = '<div class="aio-info-grid">';
 
         var fields = [
-            ['Remote ID', cert.remote_id],
-            ['Provider', cert.provider_name],
-            ['Status', cert.status],
-            ['Product', cert.product_type],
+            ['Remote ID', AioSSL.escHtml(cert.remote_id)],
+            ['Provider', AioSSL.escHtml(cert.provider_name)],
+            ['Status', '<span class="aio-badge ' + normalizeStatusClass(cert.status) + '">' + AioSSL.escHtml(cert.status) + '</span>'],
+            ['Product', productDisplay],
             ['Valid From', cert.begin_date || '—'],
             ['Valid To', cert.end_date || '—'],
             ['Serial', cert.serial_number || '—'],
-            ['Has Certificate', cert.has_cert ? '<span class="aio-text-success">Yes</span>' : '<span class="aio-text-warning">No</span>'],
+            ['Has Certificate', cert.has_cert
+                ? '<span style="color:var(--aio-success);font-weight:600;"><i class="fas fa-check-circle"></i> Yes</span>'
+                : '<span style="color:var(--aio-warning);"><i class="fas fa-exclamation-circle"></i> No</span>'],
         ];
 
         $.each(fields, function(_, f) {
@@ -530,7 +600,7 @@ ssl2buy,ORD-456,</pre>
 
         // Domains
         if (cert.domains && cert.domains.length) {
-            html += '<div class="aio-info-row"><label>Domains</label><span>';
+            html += '<div class="aio-info-row"><label>Domains (' + cert.domains.length + ')</label><span>';
             $.each(cert.domains, function(_, d) {
                 html += '<code style="display:inline-block;margin:1px 4px 1px 0;padding:2px 6px;background:var(--aio-bg);border-radius:3px;font-size:11px;">' + AioSSL.escHtml(d) + '</code>';
             });
@@ -539,6 +609,27 @@ ssl2buy,ORD-456,</pre>
 
         html += '</div>';
 
+        // ── Raw API Data (collapsible) — uses jQuery events, no inline onclick ──
+        if (cert.raw_data) {
+            _rawDataCache = cert.raw_data;
+
+            html += '<div style="margin-top:16px;border-top:1px solid var(--aio-border-light);padding-top:12px;">';
+            html += '<div class="js-raw-toggle" style="cursor:pointer;user-select:none;font-size:12px;color:var(--aio-text-secondary);display:flex;align-items:center;gap:6px;">';
+            html += '<i class="fas fa-chevron-right js-raw-chevron" style="font-size:10px;transition:transform 0.2s;"></i>';
+            html += '<i class="fas fa-code"></i> <strong>Raw API Data</strong>';
+            html += '<span style="font-size:10px;background:var(--aio-bg);padding:2px 6px;border-radius:3px;">debug</span>';
+            html += '</div>';
+            html += '<div class="js-raw-content" style="display:none;margin-top:8px;">';
+            html += '<div style="max-height:400px;overflow:auto;background:#1e1e2e;color:#cdd6f4;border-radius:6px;padding:12px;font-family:\'SF Mono\',Monaco,Consolas,monospace;font-size:11px;line-height:1.5;">';
+            html += '<pre style="margin:0;white-space:pre-wrap;word-break:break-all;">' + syntaxHighlight(cert.raw_data) + '</pre>';
+            html += '</div>';
+            html += '<div style="margin-top:6px;">';
+            html += '<button type="button" class="aio-btn js-raw-copy" style="font-size:11px;padding:4px 10px;"><i class="fas fa-copy"></i> Copy JSON</button>';
+            html += '</div>';
+            html += '</div>';
+            html += '</div>';
+        }
+
         html += '<div class="aio-alert aio-alert-info" style="margin-top:12px;font-size:12px;">' +
                 '<i class="fas fa-info-circle"></i> ' +
                 'Import will create a new record in <code>mod_aio_ssl_orders</code> and store all cert data.' +
@@ -546,6 +637,37 @@ ssl2buy,ORD-456,</pre>
 
         $('#import-preview').html(html);
     }
+
+    // ── Event delegation for raw data toggle/copy (jQuery, inside IIFE) ──
+
+    $(document).on('click', '.js-raw-toggle', function() {
+        var $content = $(this).siblings('.js-raw-content');
+        var $chevron = $(this).find('.js-raw-chevron');
+        if ($content.is(':visible')) {
+            $content.slideUp(200);
+            $chevron.css('transform', 'rotate(0deg)');
+        } else {
+            $content.slideDown(200);
+            $chevron.css('transform', 'rotate(90deg)');
+        }
+    });
+
+    $(document).on('click', '.js-raw-copy', function(e) {
+        e.stopPropagation();
+        if (!_rawDataCache) return;
+        var text = JSON.stringify(_rawDataCache, null, 2);
+        if (navigator.clipboard) {
+            navigator.clipboard.writeText(text).then(function() {
+                AioSSL.toast('JSON copied to clipboard', 'success', 2000);
+            });
+        } else {
+            var $ta = $('<textarea>').val(text).css({ position: 'fixed', opacity: 0 }).appendTo('body');
+            $ta[0].select();
+            document.execCommand('copy');
+            $ta.remove();
+            AioSSL.toast('JSON copied to clipboard', 'success', 2000);
+        }
+    });
 
     // Confirm import
     $('#btn-import-single').on('click', function() {
