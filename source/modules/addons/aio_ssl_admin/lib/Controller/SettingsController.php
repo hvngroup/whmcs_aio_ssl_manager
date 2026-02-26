@@ -25,6 +25,14 @@ class SettingsController extends BaseController
         'exchangerate_api_key', 'exchangerate_auto_enabled', 'exchangerate_update_interval',    
     ];
 
+    /** @var array Map tab → setting keys belonging to that tab */
+    private $tabKeys = [
+        'general'       => ['items_per_page', 'date_format'],
+        'sync'          => ['sync_enabled', 'sync_status_interval', 'sync_product_interval', 'sync_batch_size'],
+        'notifications' => ['notify_issuance', 'notify_expiry', 'notify_expiry_days', 'notify_sync_errors', 'notify_price_changes', 'notify_admin_email'],
+        'currency'      => ['currency_display', 'currency_usd_vnd_rate', 'exchangerate_api_key', 'exchangerate_auto_enabled', 'exchangerate_update_interval'],
+    ];
+
     public function render(string $action = ''): void
     {
         $settings = $this->loadAllSettings();
@@ -77,14 +85,26 @@ class SettingsController extends BaseController
     private function saveSettings(): array
     {
         $saved = 0;
+        $tab = $this->input('tab', '');
 
-        // Handle checkbox fields: unchecked = not in POST
-        $checkboxKeys = ['sync_enabled', 'notify_issuance', 'notify_expiry', 'notify_sync_errors', 'notify_price_changes', 'exchangerate_auto_enabled',];
+        // Determine which keys to save based on current tab
+        // If tab is valid, only save keys belonging to that tab
+        // This prevents resetting values of other tabs that aren't in the form
+        $keysToSave = isset($this->tabKeys[$tab])
+            ? $this->tabKeys[$tab]
+            : $this->allowedKeys; // fallback: save all (backward compat)
 
-        foreach ($this->allowedKeys as $key) {
+        // Only consider checkboxes that belong to the current tab
+        $allCheckboxKeys = [
+            'sync_enabled', 'notify_issuance', 'notify_expiry',
+            'notify_sync_errors', 'notify_price_changes', 'exchangerate_auto_enabled',
+        ];
+        $checkboxKeys = array_intersect($allCheckboxKeys, $keysToSave);
+
+        foreach ($keysToSave as $key) {
             $value = $this->input($key);
 
-            // Checkboxes: if not in POST, default to '0'
+            // Checkboxes: unchecked = not in POST → default '0'
             if (in_array($key, $checkboxKeys) && $value === null) {
                 $value = '0';
             }
@@ -127,7 +147,7 @@ class SettingsController extends BaseController
             }
         }
 
-        ActivityLogger::log('settings_saved', 'system', '', "Saved {$saved} settings");
+        ActivityLogger::log('settings_saved', 'system', '', "Saved {$saved} settings (tab: {$tab})");
 
         return [
             'success' => true,
@@ -242,7 +262,7 @@ class SettingsController extends BaseController
 
         return $status;
     }
-    
+
     /**
      * Fetch exchange rate from API and save
      */
