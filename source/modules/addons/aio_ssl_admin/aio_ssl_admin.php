@@ -179,6 +179,23 @@ function aio_ssl_admin_activate()
             KEY `idx_created` (`created_at`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
 
+        // Table: mod_aio_ssl_import_logs
+        $pdo->exec("CREATE TABLE IF NOT EXISTS `mod_aio_ssl_import_logs` (
+            `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
+            `type` varchar(30) NOT NULL COMMENT 'api_single, api_bulk, csv, migration, migration_all',
+            `source` varchar(100) NOT NULL COMMENT 'provider slug or csv_upload',
+            `total` int NOT NULL DEFAULT 0,
+            `success` int NOT NULL DEFAULT 0,
+            `failed` int NOT NULL DEFAULT 0,
+            `details` text DEFAULT NULL COMMENT 'JSON: errors, remote_ids, etc.',
+            `admin_id` int(10) unsigned NOT NULL DEFAULT 0,
+            `created_at` timestamp DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (`id`),
+            KEY `idx_type` (`type`),
+            KEY `idx_source` (`source`),
+            KEY `idx_created` (`created_at`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
+
         // Seed default settings
         $defaults = [
             ['sync_status_interval', '6'],

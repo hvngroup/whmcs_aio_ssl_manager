@@ -352,8 +352,12 @@
 
     // ─── Import ────────────────────────────────────────────────
 
+    /**
+     * Import single certificate (simplified — delegates to template inline JS)
+     * Kept for backward compatibility; template/import.php now handles this directly.
+     */
     AioSSL.importSingle = function() {
-        var $form = $('#aio-import-form');
+        var $form = $('#aio-single-import-form');
         AioSSL.ajax({
             page: 'import',
             action: 'single',
@@ -367,7 +371,7 @@
             }
         });
     };
-
+    
     // ─── Utility ───────────────────────────────────────────────
 
     /**
