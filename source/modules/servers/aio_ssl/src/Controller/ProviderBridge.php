@@ -2,6 +2,7 @@
 /**
  * ProviderBridge — Resolves the correct provider for a service/order
  *
+ * FIXED: getOrder() now checks all 3 tables per constraints C4 + C5
  * Resolution: mod_aio_ssl_orders → tblsslorders → nicsrs_sslorders
  *
  * @package    AioSSL\Server
@@ -15,7 +16,6 @@ use WHMCS\Database\Capsule;
 use AioSSL\Core\ProviderInterface;
 use AioSSL\Core\ProviderRegistry;
 use AioSSL\Core\ProviderFactory;
-use AioSSL\Service\PriceCompareService;
 
 class ProviderBridge
 {
@@ -77,8 +77,10 @@ class ProviderBridge
                 $product = Capsule::table('tblproducts')->find($hosting->packageid);
                 $canonicalId = $product->configoption1 ?? '';
 
-                if (!empty($canonicalId)) {
-                    $cheapest = PriceCompareService::findCheapest($canonicalId);
+                if (!empty($canonicalId)
+                    && class_exists('AioSSL\\Service\\PriceCompareService')
+                    && method_exists('AioSSL\\Service\\PriceCompareService', 'findCheapest')) {
+                    $cheapest = \AioSSL\Service\PriceCompareService::findCheapest($canonicalId);
                     if ($cheapest) {
                         return ProviderRegistry::get($cheapest['provider_slug']);
                     }
@@ -126,15 +128,18 @@ class ProviderBridge
             }
         } catch (\Exception $e) {}
 
-        // Try cheapest
+        // Try cheapest (PriceCompareService may not be implemented yet)
         if (!empty($canonicalId)) {
             try {
-                $cheapest = PriceCompareService::findCheapest($canonicalId);
-                if ($cheapest) {
-                    return [
-                        'slug' => $cheapest['provider_slug'],
-                        'provider' => ProviderRegistry::get($cheapest['provider_slug']),
-                    ];
+                if (class_exists('AioSSL\\Service\\PriceCompareService')
+                    && method_exists('AioSSL\\Service\\PriceCompareService', 'findCheapest')) {
+                    $cheapest = \AioSSL\Service\PriceCompareService::findCheapest($canonicalId);
+                    if ($cheapest) {
+                        return [
+                            'slug' => $cheapest['provider_slug'],
+                            'provider' => ProviderRegistry::get($cheapest['provider_slug']),
+                        ];
+                    }
                 }
             } catch (\Exception $e) {}
         }

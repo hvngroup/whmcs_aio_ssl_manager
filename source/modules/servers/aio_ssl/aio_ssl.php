@@ -16,19 +16,48 @@ if (!defined('WHMCS')) {
     die('This file cannot be accessed directly.');
 }
 
-// Ensure admin addon autoloader is loaded
-$autoloadPath = dirname(dirname(__DIR__)) . '/addons/aio_ssl_admin/lib/autoload.php';
-if (file_exists($autoloadPath)) {
-    require_once $autoloadPath;
+// 1) Load addon autoloader (for AioSSL\Core\*, AioSSL\Provider\*, AioSSL\Service\*)
+$addonAutoload = dirname(dirname(__DIR__)) . '/addons/aio_ssl_admin/lib/autoload.php';
+if (file_exists($addonAutoload)) {
+    require_once $addonAutoload;
 }
 
+// 2) Register server module autoloader (for AioSSL\Server\*)
+spl_autoload_register(function ($class) {
+    $prefix = 'AioSSL\\Server\\';
+    $baseDir = __DIR__ . '/src/';
+
+    $len = strlen($prefix);
+    if (strncmp($prefix, $class, $len) !== 0) {
+        return;
+    }
+
+    $relativeClass = substr($class, $len);
+    // Try multiple directory mappings
+    $searchPaths = [
+        $baseDir . str_replace('\\', '/', $relativeClass) . '.php',
+        $baseDir . 'Service/' . $relativeClass . '.php',
+        $baseDir . 'Controller/' . $relativeClass . '.php',
+        $baseDir . 'Dispatcher/' . $relativeClass . '.php',
+    ];
+
+    foreach ($searchPaths as $file) {
+        if (file_exists($file)) {
+            require_once $file;
+            return;
+        }
+    }
+});
+
 use WHMCS\Database\Capsule;
+use AioSSL\Server\OrderService;
+use AioSSL\Server\ProviderBridge;
+use AioSSL\Server\ActionDispatcher;
+use AioSSL\Server\PageDispatcher;
+use AioSSL\Server\ActionController;
 use AioSSL\Core\ProviderRegistry;
 use AioSSL\Core\ProviderFactory;
 use AioSSL\Core\ActivityLogger;
-use AioSSL\Server\ActionDispatcher;
-use AioSSL\Server\PageDispatcher;
-use AioSSL\Server\ProviderBridge;
 
 /**
  * Module metadata
@@ -692,7 +721,7 @@ function aio_ssl_ClientArea(array $params)
 
         if (isset($result['templatefile'])) {
             return [
-                'tabOverviewReplacementTemplate' => 'templates/' . $result['templatefile'] . '.tpl',
+                'tabOverviewReplacementTemplate' => 'view/' . $result['templatefile'] . '.tpl',
                 'templateVariables' => $result['vars'] ?? [],
             ];
         }
@@ -703,7 +732,7 @@ function aio_ssl_ClientArea(array $params)
         logModuleCall('aio_ssl', 'ClientArea_Error', $params, $e->getMessage());
 
         return [
-            'tabOverviewReplacementTemplate' => 'templates/error.tpl',
+            'tabOverviewReplacementTemplate' => 'view/error.tpl',
             'templateVariables' => [
                 'error_message' => $e->getMessage(),
             ],

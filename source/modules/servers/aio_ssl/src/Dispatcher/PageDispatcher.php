@@ -6,14 +6,12 @@ use WHMCS\Database\Capsule;
 
 /**
  * PageDispatcher — Route client area pages by order status
+ *
  */
 class PageDispatcher
 {
     /**
      * Dispatch page based on SSL order status
-     *
-     * @param array $params WHMCS service params
-     * @return array ['templatefile' => string, 'vars' => array]
      */
     public static function dispatchByStatus(array $params): array
     {
@@ -27,19 +25,29 @@ class PageDispatcher
             ];
         }
 
-        $configdata = json_decode($order->configdata, true) ?: [];
+        $configdata = OrderService::decodeConfigdata($order->configdata ?? '');
         $commonVars = self::buildCommonVars($order, $configdata, $params);
 
-        // Legacy order → read-only migrated template
-        if ($order->module !== 'aio_ssl') {
-            return [
-                'templatefile' => 'migrated',
-                'vars' => $commonVars,
-            ];
+        // ── Detect legacy vs AIO order ──
+        $sourceTable = $order->_source_table ?? '';
+        $isAioOrder = ($sourceTable === OrderService::TABLE);
+
+        // Legacy order from another module → read-only migrated template
+        if (!$isAioOrder) {
+            // Double check: also check the module field for tblsslorders records
+            $module = $order->module ?? '';
+            if ($module !== '' && $module !== 'aio_ssl') {
+                return [
+                    'templatefile' => 'migrated',
+                    'vars' => array_merge($commonVars, [
+                        'legacyModule' => $module,
+                    ]),
+                ];
+            }
         }
 
         // SSL2Buy limited tier → special template
-        $providerSlug = $configdata['provider'] ?? '';
+        $providerSlug = $configdata['provider'] ?? $order->provider_slug ?? '';
         if ($providerSlug === 'ssl2buy' && !in_array($order->status, ['Awaiting Configuration'])) {
             return [
                 'templatefile' => 'limited_provider',
@@ -50,17 +58,17 @@ class PageDispatcher
             ];
         }
 
-        // Status-based routing
+        // ── Status-based routing ──
         switch ($order->status) {
             case 'Awaiting Configuration':
-                // Check for draft data
+            case 'Draft':
                 $draft = $configdata['draft'] ?? [];
                 return [
                     'templatefile' => 'applycert',
                     'vars' => array_merge($commonVars, [
-                        'draft'       => $draft,
-                        'hasDraft'    => !empty($draft),
-                        'draftStep'   => $draft['step'] ?? 1,
+                        'draft'     => $draft,
+                        'hasDraft'  => !empty($draft),
+                        'draftStep' => $draft['step'] ?? 1,
                     ]),
                 ];
 
@@ -69,8 +77,8 @@ class PageDispatcher
                 return [
                     'templatefile' => 'pending',
                     'vars' => array_merge($commonVars, [
-                        'dcvStatus'  => $configdata['dcv_status'] ?? [],
-                        'dcvMethod'  => $configdata['dcv_method'] ?? 'email',
+                        'dcvStatus' => $configdata['dcv_status'] ?? [],
+                        'dcvMethod' => $configdata['dcv_method'] ?? 'email',
                     ]),
                 ];
 
@@ -109,26 +117,18 @@ class PageDispatcher
 
     /**
      * Dispatch specific page by action name
-     *
-     * @param string $action  'reissue', 'manage', etc.
-     * @param array  $params
-     * @return array
      */
     public static function dispatch(string $action, array $params): array
     {
         $order = ProviderBridge::getOrder($params['serviceid']);
-        $configdata = json_decode($order->configdata ?? '{}', true) ?: [];
+        $configdata = OrderService::decodeConfigdata($order->configdata ?? '');
         $commonVars = self::buildCommonVars($order, $configdata, $params);
 
         switch ($action) {
             case 'reissue':
-                return [
-                    'templatefile' => 'reissue',
-                    'vars' => $commonVars,
-                ];
+                return ['templatefile' => 'reissue', 'vars' => $commonVars];
             case 'downloadCert':
             case 'download':
-                // Trigger download action directly
                 ActionController::downloadCert($params);
                 exit;
             default:
@@ -141,45 +141,97 @@ class PageDispatcher
      */
     private static function buildCommonVars($order, array $configdata, array $params): array
     {
-        $providerSlug = $configdata['provider'] ?? ($order ? $order->module : 'unknown');
-        $providerLabels = [
-            'nicsrs' => 'NicSRS', 'gogetssl' => 'GoGetSSL',
-            'thesslstore' => 'TheSSLStore', 'ssl2buy' => 'SSL2Buy',
-            'aio_ssl' => 'AIO SSL',
-            'nicsrs_ssl' => 'NicSRS (Legacy)', 'SSLCENTERWHMCS' => 'GoGetSSL (Legacy)',
-            'thesslstore_ssl' => 'TheSSLStore (Legacy)',
-        ];
+        $providerSlug = $configdata['provider']
+            ?? $order->provider_slug
+            ?? '';
 
-        $hosting = Capsule::table('tblhosting')->find($params['serviceid']);
-        $domain = $hosting ? $hosting->domain : '';
+        // Fallback: resolve from legacy module name
+        $legacyMap = [
+            'nicsrs_ssl' => 'nicsrs', 'SSLCENTERWHMCS' => 'gogetssl',
+            'thesslstore_ssl' => 'thesslstore', 'ssl2buy' => 'ssl2buy',
+        ];
+        if (empty($providerSlug) && !empty($order->module)) {
+            $providerSlug = $legacyMap[$order->module] ?? '';
+        }
+
+        // Get domain — try multiple sources
+        $domain = $order->domain ?? '';
+        if (empty($domain)) {
+            $domain = $configdata['domain']
+                ?? $configdata['domainInfo'][0]['domainName']
+                ?? $params['domain']
+                ?? '';
+        }
+
+        // Get product info
+        $productCode = $order->certtype ?? $order->product_code
+            ?? $configdata['canonical'] ?? $params['configoption1'] ?? '';
+
+        // Determine SSL validation type from product map
+        $sslValidationType = 'dv';
+        $isMultiDomain = false;
+        $maxDomains = 1;
+
+        if (!empty($productCode)) {
+            try {
+                $map = Capsule::table('mod_aio_ssl_product_map')
+                    ->where('canonical_id', $productCode)
+                    ->first();
+                if ($map) {
+                    $sslValidationType = $map->validation_type ?? 'dv';
+                    $isMultiDomain = !empty($map->is_multi_domain);
+                    $maxDomains = $map->max_domains ?? 1;
+                }
+            } catch (\Exception $e) {}
+        }
 
         return [
-            'serviceId'     => $params['serviceid'],
-            'orderId'       => $order ? $order->id : 0,
-            'order'         => $order,
-            'configdata'    => $configdata,
-            'status'        => $order ? $order->status : 'Unknown',
-            'certType'      => $order ? $order->certtype : '',
-            'remoteid'      => $order ? $order->remoteid : '',
-            'domains'       => $configdata['domains'] ?? ($domain ? [$domain] : []),
-            'domain'        => $domain,
-            'provider'      => $providerSlug,
-            'providerLabel' => $providerLabels[$providerSlug] ?? ucfirst($providerSlug),
-            'beginDate'     => $configdata['begin_date'] ?? '',
-            'endDate'       => $configdata['end_date'] ?? '',
-            'hasCert'       => !empty($configdata['cert']),
-            'moduleVersion' => defined('AIO_SSL_VERSION') ? AIO_SSL_VERSION : '1.0.0',
+            // Order data
+            'serviceid'         => $params['serviceid'],
+            'orderStatus'       => $order->status ?? 'Unknown',
+            'domain'            => $domain,
+            'remoteId'          => $order->remote_id ?? $order->remoteid ?? '',
+            'orderId'           => $order->id ?? 0,
+
+            // Provider
+            'providerSlug'      => $providerSlug,
+            'providerName'      => strtoupper($providerSlug),
+
+            // Product
+            'productCode'       => $productCode,
+            'sslValidationType' => $sslValidationType,
+            'isMultiDomain'     => $isMultiDomain,
+            'maxDomains'        => $maxDomains,
+
+            // Source info
+            'sourceTable'       => $order->_source_table ?? '',
+            'isLegacy'          => ($order->_source_table ?? '') !== OrderService::TABLE,
+            'legacyModule'      => $order->module ?? '',
+
+            // Configdata passthrough
+            'configData'        => $configdata,
+
+            // WHMCS module link (for AJAX calls)
+            'moduleLink'        => 'clientarea.php?action=productdetails&id=' . $params['serviceid'],
+
+            // Can auto-generate CSR
+            'canAutoGenerate'   => function_exists('openssl_pkey_new'),
         ];
     }
 
     /**
      * Check if provider supports a capability
      */
-    private static function providerCan(string $slug, string $capability): bool
+    private static function providerCan(string $providerSlug, string $capability): bool
     {
+        if (empty($providerSlug)) {
+            return false;
+        }
+
         try {
-            $provider = \AioSSL\Core\ProviderRegistry::get($slug);
-            return in_array($capability, $provider->getCapabilities());
+            $provider = \AioSSL\Core\ProviderRegistry::get($providerSlug);
+            $caps = $provider->getCapabilities();
+            return in_array($capability, $caps);
         } catch (\Exception $e) {
             return false;
         }
