@@ -22,6 +22,13 @@ if (file_exists($addonAutoload)) {
     require_once $addonAutoload;
 }
 
+// Ensure addon constants exist (server module may load before addon)
+if (!defined('AIO_SSL_VERSION'))   define('AIO_SSL_VERSION', '1.0.0');
+if (!defined('AIO_SSL_PATH'))      define('AIO_SSL_PATH', dirname(dirname(__DIR__)) . '/addons/aio_ssl_admin');
+if (!defined('AIO_SSL_ADMIN_PATH')) define('AIO_SSL_ADMIN_PATH', AIO_SSL_PATH);
+if (!defined('AIO_TEMPLATE_PATH')) define('AIO_TEMPLATE_PATH', AIO_SSL_PATH . '/templates');
+if (!defined('AIO_SSL_LANG_PATH')) define('AIO_SSL_LANG_PATH', AIO_SSL_PATH . '/lang');
+
 // 2) Register server module autoloader (for AioSSL\Server\*)
 spl_autoload_register(function ($class) {
     $prefix = 'AioSSL\\Server\\';

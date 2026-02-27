@@ -1,36 +1,36 @@
 {* ══════════════════════════════════════════════════════════════════════
-   FILE: view/limited_provider.tpl — SSL2Buy config link view
+   FILE: view/limited_provider.tpl — SSL2Buy / limited tier
+   Shows external config link. This is the ONLY template showing
+   a provider-related hint (because user needs the external portal)
    ══════════════════════════════════════════════════════════════════════ *}
-{* Save as: modules/servers/aio_ssl/view/limited_provider.tpl *}
 
 <link rel="stylesheet" href="{$WEB_ROOT}/modules/servers/aio_ssl/assets/css/ssl-manager.css">
 
-<div class="sslm-container">
+<div class="sslm-container" id="aio-ssl-app">
     <div class="sslm-header">
         <h2 class="sslm-title"><i class="fas fa-shield-alt"></i> {$_LANG.certificate_management|default:'Certificate Management'}</h2>
         <div class="sslm-header-info">
-            <span class="sslm-badge sslm-badge-provider">{$providerSlug|upper|escape:'html'}</span>
-            <span class="sslm-badge sslm-badge-warning">{$_LANG.limited_api|default:'Limited API'}</span>
+            <span class="sslm-product-name">{$productCode|escape:'html'}</span>
         </div>
     </div>
 
     <div class="sslm-alert sslm-alert-info">
         <i class="fas fa-external-link-alt"></i>
         <div>
-            <strong>{$_LANG.manage_externally|default:'Manage at Provider Portal'}</strong>
-            <p>{$_LANG.limited_desc|default:'This provider uses a limited API. Please complete configuration and manage your certificate at the provider portal.'}</p>
+            <strong>{$_LANG.manage_externally|default:'Configure at Provider Portal'}</strong>
+            <p>{$_LANG.limited_desc|default:'Your certificate needs to be configured through the provider portal. Click the button below to open the configuration page.'}</p>
         </div>
     </div>
 
     <div class="sslm-section">
-        <div class="sslm-section-body" style="text-align:center; padding:30px;">
+        <div class="sslm-section-body" style="text-align:center;padding:30px;">
             {if $configLink}
             <a href="{$configLink|escape:'html'}" target="_blank" class="sslm-btn sslm-btn-primary sslm-btn-lg">
-                <i class="fas fa-external-link-alt"></i> {$_LANG.open_portal|default:'Open Provider Portal'}
+                <i class="fas fa-external-link-alt"></i> {$_LANG.open_portal|default:'Open Configuration Page'}
             </a>
             {if $pin}
             <div style="margin-top:15px;">
-                <span class="sslm-hint">{$_LANG.your_pin|default:'Your PIN'}:</span>
+                <span class="sslm-form-hint">{$_LANG.your_pin|default:'Your PIN'}:</span>
                 <code class="sslm-pin">{$pin|escape:'html'}</code>
             </div>
             {/if}
@@ -45,8 +45,14 @@
     <div class="sslm-section">
         <div class="sslm-section-body">
             <div class="sslm-info-grid">
-                <div class="sslm-info-item"><span class="sslm-info-label">{$_LANG.domain|default:'Domain'}</span><span class="sslm-info-value"><code>{$domain|escape:'html'}</code></span></div>
-                <div class="sslm-info-item"><span class="sslm-info-label">{$_LANG.status|default:'Status'}</span><span class="sslm-info-value"><span class="sslm-badge">{$orderStatus|escape:'html'}</span></span></div>
+                <div class="sslm-info-item">
+                    <label>{$_LANG.domain|default:'Domain'}</label>
+                    <span><code>{$domain|escape:'html'}</code></span>
+                </div>
+                <div class="sslm-info-item">
+                    <label>{$_LANG.status|default:'Status'}</label>
+                    <span class="sslm-badge">{$orderStatus|escape:'html'}</span>
+                </div>
             </div>
         </div>
     </div>

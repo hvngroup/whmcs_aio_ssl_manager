@@ -78,10 +78,12 @@ class ActionController
             // Store private key in order configdata
             $order = ProviderBridge::getOrder($params['serviceid']);
             if ($order) {
-                ProviderBridge::updateOrderConfig($order->id, [
-                    'private_key' => $keyOut,
-                    'csr'         => $csrOut,
-                    'csr_domain'  => $domain,
+                $existingConfig = OrderService::decodeConfigdata($order->configdata ?? '');
+                $existingConfig['private_key'] = $keyOut;
+                $existingConfig['csr'] = $csrOut;
+                $existingConfig['csr_domain'] = $domain;
+                ProviderBridge::updateOrder($order, [
+                    'configdata' => json_encode($existingConfig, JSON_UNESCAPED_UNICODE),
                 ]);
             }
 
@@ -120,15 +122,14 @@ class ActionController
         }
 
         return [
-            'success' => true,
-            'data'    => [
-                'commonName'   => $parsed['CN'] ?? '',
-                'organization' => $parsed['O'] ?? '',
-                'country'      => $parsed['C'] ?? '',
-                'state'        => $parsed['ST'] ?? '',
-                'city'         => $parsed['L'] ?? '',
-                'email'        => $parsed['emailAddress'] ?? '',
-            ],
+            'success'  => true,
+            'CN'       => $parsed['CN'] ?? '',
+            'O'        => $parsed['O'] ?? '',
+            'C'        => $parsed['C'] ?? '',
+            'ST'       => $parsed['ST'] ?? '',
+            'L'        => $parsed['L'] ?? '',
+            'email'    => $parsed['emailAddress'] ?? '',
+            'keySize'  => '',
         ];
     }
 

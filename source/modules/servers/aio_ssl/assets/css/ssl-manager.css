@@ -154,6 +154,73 @@
 .sslm-text-success { color: var(--sslm-success); }
 .sslm-text-danger { color: var(--sslm-danger); }
 
+/* ── Step Number (NicSRS style) ── */
+.sslm-step-number { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%; background: var(--sslm-primary); color: #fff; font-size: 12px; font-weight: 700; margin-right: 8px; }
+
+/* ── Toggle Switch ── */
+.sslm-toggle { display: flex; align-items: center; gap: 10px; cursor: pointer; user-select: none; }
+.sslm-toggle input { display: none; }
+.sslm-toggle-slider { width: 40px; height: 22px; background: #d9d9d9; border-radius: 11px; position: relative; transition: var(--sslm-transition); flex-shrink: 0; }
+.sslm-toggle-slider::after { content: ''; position: absolute; width: 18px; height: 18px; border-radius: 50%; background: #fff; top: 2px; left: 2px; transition: var(--sslm-transition); }
+.sslm-toggle input:checked + .sslm-toggle-slider { background: var(--sslm-primary); }
+.sslm-toggle input:checked + .sslm-toggle-slider::after { left: 20px; }
+.sslm-toggle-label { font-size: 13px; color: var(--sslm-text); }
+
+/* ── Form Row (multi-column) ── */
+.sslm-form-row { display: flex; gap: 16px; margin-bottom: 12px; }
+.sslm-form-row .sslm-form-group { margin-bottom: 0; }
+.sslm-col-4 { flex: 0 0 calc(33.33% - 11px); }
+.sslm-col-6 { flex: 0 0 calc(50% - 8px); }
+.sslm-col-full { flex: 1 1 100%; }
+.sslm-form-hint { font-size: 12px; color: var(--sslm-text-hint); margin-top: 4px; }
+
+/* ── SAN Domain Row ── */
+.sslm-san-row { display: flex; gap: 8px; margin-bottom: 8px; align-items: center; }
+.sslm-san-row .sslm-input { flex: 1; }
+
+/* ── Textarea Actions ── */
+.sslm-textarea-actions { display: flex; gap: 8px; margin-top: 8px; }
+
+/* ── Help Text ── */
+.sslm-help-text { font-size: 13px; color: var(--sslm-text-secondary); line-height: 1.6; }
+.sslm-help-text i { color: var(--sslm-warning); margin-right: 4px; }
+
+/* ── CSR Decode Result ── */
+.sslm-csr-decode-result { background: var(--sslm-bg); border-radius: var(--sslm-radius); padding: 16px; margin-top: 16px; }
+.sslm-csr-decode-result h4 { margin: 0 0 12px; font-size: 13px; font-weight: 600; }
+.sslm-info-table { width: 100%; font-size: 13px; }
+.sslm-info-table td { padding: 6px 8px; border-bottom: 1px solid var(--sslm-border); }
+.sslm-info-table td:first-child { font-weight: 500; color: var(--sslm-text-secondary); width: 140px; }
+
+/* ── Code Display ── */
+.sslm-code { font-family: 'SFMono-Regular', Consolas, monospace; font-size: 13px; background: var(--sslm-bg); padding: 2px 6px; border-radius: 3px; }
+
+/* ── Collapsible Section ── */
+.sslm-collapsible .sslm-section-body { transition: max-height 0.3s ease, padding 0.3s ease; overflow: hidden; }
+.sslm-collapsible.collapsed .sslm-section-body { max-height: 0; padding-top: 0; padding-bottom: 0; }
+.sslm-collapse-icon { transition: transform 0.3s ease; margin-left: auto; }
+.sslm-collapsible.collapsed .sslm-collapse-icon { transform: rotate(-90deg); }
+.sslm-section-header h3 { display: flex; align-items: center; }
+
+/* ── Certificate Display ── */
+.sslm-cert-display { border: 1px solid var(--sslm-border); border-radius: var(--sslm-radius); overflow: hidden; }
+.sslm-cert-display-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; background: var(--sslm-bg); border-bottom: 1px solid var(--sslm-border); font-size: 12px; font-weight: 600; }
+.sslm-cert-display-body { padding: 12px; }
+.sslm-cert-display-body pre { margin: 0; font-size: 11px; line-height: 1.4; white-space: pre-wrap; word-break: break-all; max-height: 200px; overflow-y: auto; }
+
+/* ── Help Grid ── */
+.sslm-help-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+.sslm-help-item { padding: 16px; background: var(--sslm-bg); border-radius: var(--sslm-radius); }
+.sslm-help-item h4 { margin: 0 0 8px; font-size: 14px; display: flex; align-items: center; gap: 6px; }
+.sslm-help-item p { margin: 0 0 8px; font-size: 13px; color: var(--sslm-text-secondary); line-height: 1.5; }
+
+/* ── Card Header Actions (right-aligned buttons in section header) ── */
+.sslm-card-header-actions { margin-left: auto; }
+.sslm-section-header { display: flex; align-items: center; }
+
+/* ── Form Actions ── */
+.sslm-form-actions { display: flex; gap: 10px; justify-content: flex-end; padding: 20px 0; margin-top: 8px; }
+
 /* ── Responsive ── */
 @media (max-width: 768px) {
     .sslm-form-grid { grid-template-columns: 1fr; }

@@ -1,7 +1,6 @@
 {* ══════════════════════════════════════════════════════════════════════
    FILE: view/message.tpl — Generic info message
    ══════════════════════════════════════════════════════════════════════ *}
-{* Save as: modules/servers/aio_ssl/view/message.tpl *}
 
 <link rel="stylesheet" href="{$WEB_ROOT}/modules/servers/aio_ssl/assets/css/ssl-manager.css">
 

@@ -7,6 +7,8 @@ use WHMCS\Database\Capsule;
 /**
  * PageDispatcher — Route client area pages by order status
  *
+ * FIXED: Detect AIO orders via _source_table instead of module column
+ * (mod_aio_ssl_orders has no 'module' column)
  */
 class PageDispatcher
 {
@@ -29,6 +31,8 @@ class PageDispatcher
         $commonVars = self::buildCommonVars($order, $configdata, $params);
 
         // ── Detect legacy vs AIO order ──
+        // FIX: Use _source_table (set by ProviderBridge::getOrder) instead of
+        // $order->module, because mod_aio_ssl_orders has no 'module' column.
         $sourceTable = $order->_source_table ?? '';
         $isAioOrder = ($sourceTable === OrderService::TABLE);
 
@@ -138,6 +142,8 @@ class PageDispatcher
 
     /**
      * Build common template variables
+     *
+     * FIXED: Handle both mod_aio_ssl_orders and tblsslorders field names
      */
     private static function buildCommonVars($order, array $configdata, array $params): array
     {
@@ -193,9 +199,8 @@ class PageDispatcher
             'remoteId'          => $order->remote_id ?? $order->remoteid ?? '',
             'orderId'           => $order->id ?? 0,
 
-            // Provider
+            // Provider (internal use only — NOT shown to client)
             'providerSlug'      => $providerSlug,
-            'providerName'      => strtoupper($providerSlug),
 
             // Product
             'productCode'       => $productCode,
@@ -208,6 +213,12 @@ class PageDispatcher
             'isLegacy'          => ($order->_source_table ?? '') !== OrderService::TABLE,
             'legacyModule'      => $order->module ?? '',
 
+            // Dates
+            'beginDate'         => $order->begin_date ?? $configdata['begin_date']
+                                   ?? $configdata['applyReturn']['beginDate'] ?? '',
+            'endDate'           => $order->end_date ?? $configdata['end_date']
+                                   ?? $configdata['applyReturn']['endDate'] ?? '',
+
             // Configdata passthrough
             'configData'        => $configdata,
 
@@ -216,6 +227,9 @@ class PageDispatcher
 
             // Can auto-generate CSR
             'canAutoGenerate'   => function_exists('openssl_pkey_new'),
+
+            // Client details (for pre-filling contact forms)
+            'clientsdetails'    => $params['clientsdetails'] ?? [],
         ];
     }
 
