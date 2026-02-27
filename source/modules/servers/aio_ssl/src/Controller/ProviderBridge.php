@@ -2,12 +2,7 @@
 /**
  * ProviderBridge — Resolves the correct provider for a service/order
  *
- * Resolution order:
- * 1. Check mod_aio_ssl_orders configdata.provider (claimed order)
- * 2. Check tblsslorders configdata.provider (existing order)
- * 3. Check tblproducts.configoption2 (product-level preference)
- * 4. If 'auto' → use PriceCompareService to find cheapest
- * 5. Return provider instance via ProviderFactory
+ * Resolution: mod_aio_ssl_orders → tblsslorders → nicsrs_sslorders
  *
  * @package    AioSSL\Server
  * @author     HVN GROUP <dev@hvn.vn>
@@ -32,6 +27,7 @@ class ProviderBridge
         'SSLCENTERWHMCS'     => 'gogetssl',
         'thesslstore_ssl'    => 'thesslstore',
         'thesslstorefullv2'  => 'thesslstore',
+        'thesslstore'        => 'thesslstore',
         'ssl2buy'            => 'ssl2buy',
     ];
 
@@ -44,157 +40,181 @@ class ProviderBridge
      */
     public static function getProvider(int $serviceId): ProviderInterface
     {
-        // Step 0: Check mod_aio_ssl_orders (claimed orders)
-        try {
-            $aioOrder = Capsule::table('mod_aio_ssl_orders')
-                ->where('serviceid', $serviceId)
-                ->orderBy('id', 'desc')
-                ->first();
-
-            if ($aioOrder && !empty($aioOrder->provider)) {
-                return ProviderRegistry::get($aioOrder->provider);
-            }
-        } catch (\Exception $e) {
-            // Table may not exist yet — continue
-        }
-
-        // Step 1: Check tblsslorders configdata
-        $order = Capsule::table('tblsslorders')
-            ->where('serviceid', $serviceId)
-            ->orderBy('id', 'desc')
-            ->first();
+        $order = self::getOrder($serviceId);
 
         if ($order) {
-            $configdata = json_decode($order->configdata, true) ?: [];
-            $slug = $configdata['provider'] ?? '';
+            $configdata = OrderService::decodeConfigdata($order->configdata ?? '');
+            $slug = $order->provider_slug ?? $configdata['provider'] ?? '';
+
+            // Legacy module detection
+            if (empty($slug) && !empty($order->module)) {
+                $slug = self::LEGACY_MAP[$order->module] ?? '';
+            }
 
             if (!empty($slug) && $slug !== 'auto') {
                 return ProviderRegistry::get($slug);
             }
-
-            // Legacy module detection
-            if ($order->module !== 'aio_ssl' && !empty($order->module)) {
-                $legacySlug = self::LEGACY_MAP[$order->module] ?? '';
-                if ($legacySlug) {
-                    return ProviderRegistry::get($legacySlug);
-                }
-            }
         }
 
-        // Step 1b: Check nicsrs_sslorders (NicSRS uses separate table)
+        // Step 2: Check tblproducts.configoption2
         try {
-            $nicsrsOrder = Capsule::table('nicsrs_sslorders')
-                ->where('serviceid', $serviceId)
+            $hosting = Capsule::table('tblhosting')->find($serviceId);
+            if ($hosting) {
+                $product = Capsule::table('tblproducts')->find($hosting->packageid);
+                if ($product) {
+                    $configoption2 = $product->configoption2 ?? '';
+                    if (!empty($configoption2) && $configoption2 !== 'auto') {
+                        return ProviderRegistry::get($configoption2);
+                    }
+                }
+            }
+        } catch (\Exception $e) {}
+
+        // Step 3: Auto — find cheapest provider for canonical product
+        try {
+            $hosting = Capsule::table('tblhosting')->find($serviceId);
+            if ($hosting) {
+                $product = Capsule::table('tblproducts')->find($hosting->packageid);
+                $canonicalId = $product->configoption1 ?? '';
+
+                if (!empty($canonicalId)) {
+                    $cheapest = PriceCompareService::findCheapest($canonicalId);
+                    if ($cheapest) {
+                        return ProviderRegistry::get($cheapest['provider_slug']);
+                    }
+                }
+            }
+        } catch (\Exception $e) {}
+
+        // Step 4: First enabled provider
+        $firstProvider = Capsule::table('mod_aio_ssl_providers')
+            ->where('is_enabled', 1)
+            ->orderBy('sort_order')
+            ->first();
+
+        if ($firstProvider) {
+            return ProviderRegistry::get($firstProvider->slug);
+        }
+
+        throw new \RuntimeException('No SSL provider available. Configure providers in AIO SSL Admin.');
+    }
+
+    /**
+     * Resolve provider for a product/service (used by CreateAccount)
+     *
+     * @param int    $serviceId
+     * @param string $canonicalId
+     * @return array ['slug' => string, 'provider' => ProviderInterface]
+     */
+    public static function resolveProvider(int $serviceId, string $canonicalId = ''): array
+    {
+        // Check configoption2 first
+        try {
+            $hosting = Capsule::table('tblhosting')->find($serviceId);
+            if ($hosting) {
+                $product = Capsule::table('tblproducts')->find($hosting->packageid);
+                $slug = $product->configoption2 ?? '';
+
+                if (!empty($slug) && $slug !== 'auto') {
+                    return ['slug' => $slug, 'provider' => ProviderRegistry::get($slug)];
+                }
+
+                // Use canonical from product if not passed
+                if (empty($canonicalId)) {
+                    $canonicalId = $product->configoption1 ?? '';
+                }
+            }
+        } catch (\Exception $e) {}
+
+        // Try cheapest
+        if (!empty($canonicalId)) {
+            try {
+                $cheapest = PriceCompareService::findCheapest($canonicalId);
+                if ($cheapest) {
+                    return [
+                        'slug' => $cheapest['provider_slug'],
+                        'provider' => ProviderRegistry::get($cheapest['provider_slug']),
+                    ];
+                }
+            } catch (\Exception $e) {}
+        }
+
+        // First enabled
+        $first = Capsule::table('mod_aio_ssl_providers')
+            ->where('is_enabled', 1)->orderBy('sort_order')->first();
+
+        if ($first) {
+            return ['slug' => $first->slug, 'provider' => ProviderRegistry::get($first->slug)];
+        }
+
+        throw new \RuntimeException('No SSL provider available.');
+    }
+
+    /**
+     * Get SSL order for a service — checks ALL 3 tables
+     *
+     * Priority: mod_aio_ssl_orders → tblsslorders → nicsrs_sslorders
+     * Constraint C4 (dual-table read) + C5 (NicSRS custom table)
+     *
+     * @param int $serviceId
+     * @return object|null Normalized order object with `_source_table` property
+     */
+    public static function getOrder(int $serviceId): ?object
+    {
+        // ── 1. mod_aio_ssl_orders (primary) ──
+        try {
+            $order = Capsule::table('mod_aio_ssl_orders')
+                ->where('service_id', $serviceId)
                 ->orderBy('id', 'desc')
                 ->first();
 
-            if ($nicsrsOrder) {
-                return ProviderRegistry::get('nicsrs');
+            if ($order) {
+                $order->_source_table = 'mod_aio_ssl_orders';
+                // Normalize to common field names
+                $order->serviceid = $order->service_id;
+                $order->remoteid  = $order->remote_id;
+                return $order;
             }
         } catch (\Exception $e) {
             // Table may not exist — continue
         }
 
-        // Step 2: Check product config options
-        $product = Capsule::table('tblhosting')
-            ->join('tblproducts', 'tblhosting.packageid', '=', 'tblproducts.id')
-            ->where('tblhosting.id', $serviceId)
-            ->select('tblproducts.configoption1', 'tblproducts.configoption2', 'tblproducts.configoption4')
-            ->first();
-
-        if ($product) {
-            $preferredSlug = $product->configoption2 ?? 'auto';
-            $canonicalId = $product->configoption1 ?? '';
-            $fallbackSlug = $product->configoption4 ?? '';
-
-            // Specific provider selected
-            if (!empty($preferredSlug) && $preferredSlug !== 'auto') {
-                try {
-                    return ProviderRegistry::get($preferredSlug);
-                } catch (\Exception $e) {
-                    // Try fallback
-                    if (!empty($fallbackSlug)) {
-                        try {
-                            return ProviderRegistry::get($fallbackSlug);
-                        } catch (\Exception $e2) {
-                            // Continue to auto-select
-                        }
-                    }
-                }
-            }
-
-            // Step 3: Auto-select cheapest provider
-            if (!empty($canonicalId)) {
-                $pcs = new PriceCompareService();
-                $cheapest = $pcs->getCheapest($canonicalId, 12);
-                if ($cheapest && !empty($cheapest['slug'])) {
-                    return ProviderRegistry::get($cheapest['slug']);
-                }
-            }
-        }
-
-        throw new \RuntimeException(
-            'Unable to resolve provider for service #' . $serviceId
-            . '. Please configure a provider in the product settings.'
-        );
-    }
-
-    /**
-     * Get provider slug for a service (without creating instance)
-     *
-     * @param int $serviceId
-     * @return string Provider slug
-     */
-    public static function getProviderSlug(int $serviceId): string
-    {
+        // ── 2. tblsslorders ──
         try {
-            $provider = self::getProvider($serviceId);
-            return $provider->getSlug();
-        } catch (\Exception $e) {
-            return '';
-        }
-    }
-
-    /**
-     * Get the active SSL order for a service
-     *
-     * Checks mod_aio_ssl_orders first, then tblsslorders, then nicsrs_sslorders
-     *
-     * @param int $serviceId
-     * @return object|null
-     */
-    public static function getOrder(int $serviceId): ?object
-    {
-        // Priority 1: mod_aio_ssl_orders (AIO native + claimed)
-        try {
-            $aioOrder = Capsule::table('mod_aio_ssl_orders')
+            $order = Capsule::table('tblsslorders')
                 ->where('serviceid', $serviceId)
                 ->orderBy('id', 'desc')
                 ->first();
-            if ($aioOrder) {
-                return $aioOrder;
+
+            if ($order) {
+                $order->_source_table = 'tblsslorders';
+                $order->service_id = $order->serviceid;
+                $order->remote_id  = $order->remoteid ?? null;
+                $order->provider_slug = null; // Will be resolved from configdata/module
+
+                // Resolve provider_slug from module name
+                if (!empty($order->module) && $order->module !== 'aio_ssl') {
+                    $order->provider_slug = self::LEGACY_MAP[$order->module] ?? null;
+                }
+
+                return $order;
             }
         } catch (\Exception $e) {}
 
-        // Priority 2: tblsslorders
-        $order = Capsule::table('tblsslorders')
-            ->where('serviceid', $serviceId)
-            ->orderBy('id', 'desc')
-            ->first();
-        if ($order) {
-            return $order;
-        }
-
-        // Priority 3: nicsrs_sslorders
+        // ── 3. nicsrs_sslorders (constraint C5) ──
         try {
-            $nicsrs = Capsule::table('nicsrs_sslorders')
+            $order = Capsule::table('nicsrs_sslorders')
                 ->where('serviceid', $serviceId)
                 ->orderBy('id', 'desc')
                 ->first();
-            if ($nicsrs) {
-                // Inject 'module' for compatibility
-                $nicsrs->module = 'nicsrs_ssl';
-                return $nicsrs;
+
+            if ($order) {
+                $order->_source_table = 'nicsrs_sslorders';
+                $order->service_id    = $order->serviceid;
+                $order->remote_id     = $order->remoteid ?? null;
+                $order->provider_slug = 'nicsrs';
+                $order->module        = 'nicsrs_ssl';
+                return $order;
             }
         } catch (\Exception $e) {}
 
@@ -202,68 +222,59 @@ class ProviderBridge
     }
 
     /**
-     * Update order configdata (merge)
-     *
-     * @param int   $orderId
-     * @param array $mergeData
-     * @param string $table Which table (auto-detect if empty)
+     * Get provider slug from an order object
      */
-    public static function updateOrderConfig(int $orderId, array $mergeData, string $table = ''): void
+    public static function resolveSlugFromOrder(object $order): string
     {
-        $tables = $table ? [$table] : ['mod_aio_ssl_orders', 'tblsslorders'];
+        // Direct provider_slug field
+        if (!empty($order->provider_slug)) {
+            return $order->provider_slug;
+        }
 
-        foreach ($tables as $t) {
-            try {
-                $order = Capsule::table($t)->find($orderId);
-                if ($order) {
-                    $existing = json_decode($order->configdata, true) ?: [];
-                    $merged = array_merge($existing, $mergeData);
-                    Capsule::table($t)->where('id', $orderId)->update([
-                        'configdata' => json_encode($merged),
-                        'updated_at' => date('Y-m-d H:i:s'),
-                    ]);
-                    return;
-                }
-            } catch (\Exception $e) {
-                continue;
+        // From configdata
+        $configdata = OrderService::decodeConfigdata($order->configdata ?? '');
+        if (!empty($configdata['provider'])) {
+            return $configdata['provider'];
+        }
+
+        // From legacy module name
+        if (!empty($order->module)) {
+            return self::LEGACY_MAP[$order->module] ?? '';
+        }
+
+        return '';
+    }
+
+    /**
+     * Update the correct table based on order source
+     *
+     * @param object $order  Order with _source_table
+     * @param array  $data   Fields to update
+     */
+    public static function updateOrder(object $order, array $data): bool
+    {
+        $table = $order->_source_table ?? 'mod_aio_ssl_orders';
+
+        if ($table === 'mod_aio_ssl_orders') {
+            return OrderService::update($order->id, $data);
+        }
+
+        // Legacy tables — map field names
+        $legacyData = [];
+        foreach ($data as $key => $value) {
+            switch ($key) {
+                case 'service_id': $legacyData['serviceid'] = $value; break;
+                case 'remote_id':  $legacyData['remoteid'] = $value; break;
+                default:           $legacyData[$key] = $value;
             }
         }
-    }
 
-    /**
-     * Get canonical product ID for a service
-     *
-     * @param int $serviceId
-     * @return string
-     */
-    public static function getCanonicalId(int $serviceId): string
-    {
-        $product = Capsule::table('tblhosting')
-            ->join('tblproducts', 'tblhosting.packageid', '=', 'tblproducts.id')
-            ->where('tblhosting.id', $serviceId)
-            ->value('tblproducts.configoption1');
-
-        return $product ?: '';
-    }
-
-    /**
-     * Get provider-specific product code from canonical mapping
-     *
-     * @param string $canonicalId
-     * @param string $providerSlug
-     * @return string
-     */
-    public static function getProviderProductCode(string $canonicalId, string $providerSlug): string
-    {
-        $column = $providerSlug . '_code';
-        $allowed = ['nicsrs_code', 'gogetssl_code', 'thesslstore_code', 'ssl2buy_code'];
-
-        if (!in_array($column, $allowed)) {
-            return '';
+        try {
+            return Capsule::table($table)
+                ->where('id', $order->id)
+                ->update($legacyData) >= 0;
+        } catch (\Exception $e) {
+            return false;
         }
-
-        return (string)Capsule::table('mod_aio_ssl_product_map')
-            ->where('canonical_id', $canonicalId)
-            ->value($column) ?: '';
     }
 }

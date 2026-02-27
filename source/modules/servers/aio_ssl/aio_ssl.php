@@ -118,67 +118,118 @@ function aio_ssl_CreateAccount(array $params)
 {
     try {
         $serviceId = $params['serviceid'];
-        $clientId = $params['userid'];
-        $canonicalId = $params['configoption1'] ?? '';
-        $preferredProvider = $params['configoption2'] ?? 'auto';
+        $userId    = $params['userid'] ?? $params['clientsdetails']['userid'] ?? 0;
 
-        if (empty($canonicalId)) {
-            return 'No certificate product selected in module configuration.';
-        }
-
-        // Check if SSL order already exists for this service (vendor migration)
-        $existingOrder = Capsule::table('tblsslorders')
-            ->where('serviceid', $serviceId)
-            ->first();
+        // ── Step 1: Check for existing orders across ALL tables ──
+        $existingOrder = OrderService::findAnyOrderForService($serviceId);
 
         if ($existingOrder) {
-            // Vendor migration scenario: order exists from legacy module
-            if ($existingOrder->module !== 'aio_ssl') {
-                ActivityLogger::log(
-                    'create_account_legacy_detected',
-                    'order',
-                    (string)$existingOrder->id,
-                    "Legacy order detected (module: {$existingOrder->module}) for service #{$serviceId}"
-                );
-                return 'success'; // Allow activation; legacy order will be shown in migrated view
+            $status = strtolower($existingOrder->status ?? '');
+
+            // If order is in a terminal state, allow new order
+            if (!in_array($status, ['cancelled', 'expired', 'revoked', 'rejected'])) {
+                // Active/pending order exists — check if legacy migration
+                if ($existingOrder->_source_table !== OrderService::TABLE) {
+                    // Legacy order from another module — create AIO shadow record
+                    logModuleCall('aio_ssl', 'CreateAccount', [
+                        'serviceid' => $serviceId,
+                        'legacy_source' => $existingOrder->_source_table,
+                        'legacy_id' => $existingOrder->id,
+                    ], 'Legacy order detected, creating AIO record');
+                } else {
+                    // AIO order already exists and is active
+                    return 'An active SSL order already exists for this service. '
+                         . 'Use "Allow New Certificate" to reset.';
+                }
             }
-            return 'success'; // Already has AIO order
         }
 
-        // Create new tblsslorders record
-        $orderId = Capsule::table('tblsslorders')->insertGetId([
-            'userid'         => $clientId,
-            'serviceid'      => $serviceId,
-            'addon_id'       => 0,
-            'remoteid'       => '',
-            'module'         => 'aio_ssl',
-            'certtype'       => $canonicalId,
-            'completiondate' => '0000-00-00 00:00:00',
-            'status'         => 'Awaiting Configuration',
-            'configdata'     => json_encode([
-                'provider'       => $preferredProvider,
-                'canonical_id'   => $canonicalId,
-                'created_at'     => date('Y-m-d H:i:s'),
-                'created_by'     => 'aio_ssl',
-            ]),
+        // ── Step 2: Resolve provider ──
+        $providerSlug = '';
+        $canonicalId = '';
+
+        // Check configoption2 for provider preference
+        $configOption2 = $params['configoption2'] ?? '';
+        if (!empty($configOption2) && $configOption2 !== 'auto') {
+            $providerSlug = $configOption2;
+        }
+
+        // Get canonical product from configoption1
+        $configOption1 = $params['configoption1'] ?? '';
+
+        // If no specific provider, try auto-resolve cheapest
+        if (empty($providerSlug) || $providerSlug === 'auto') {
+            try {
+                $bridge = ProviderBridge::resolveProvider($serviceId, $configOption1);
+                $providerSlug = $bridge['slug'] ?? '';
+            } catch (\Exception $e) {
+                // Fallback: use first enabled provider
+                $firstProvider = Capsule::table('mod_aio_ssl_providers')
+                    ->where('is_enabled', 1)
+                    ->orderBy('sort_order')
+                    ->first();
+
+                if ($firstProvider) {
+                    $providerSlug = $firstProvider->slug;
+                }
+            }
+        }
+
+        if (empty($providerSlug)) {
+            return 'No SSL provider configured. Please add and enable a provider in AIO SSL Admin.';
+        }
+
+        // ── Step 3: Get domain ──
+        $domain = $params['domain'] ?? '';
+        if (empty($domain)) {
+            $hosting = Capsule::table('tblhosting')->find($serviceId);
+            $domain = $hosting ? $hosting->domain : '';
+        }
+
+        // ── Step 4: Create record in mod_aio_ssl_orders ──
+        $configdata = [
+            'provider'    => $providerSlug,
+            'canonical'   => $configOption1,
+            'created_via' => 'CreateAccount',
+            'created_at'  => date('Y-m-d H:i:s'),
+        ];
+
+        // If legacy order exists, store reference
+        if ($existingOrder && $existingOrder->_source_table !== OrderService::TABLE) {
+            $configdata['legacy_source'] = $existingOrder->_source_table;
+            $configdata['legacy_id'] = $existingOrder->id;
+            $configdata['legacy_module'] = $existingOrder->module ?? '';
+        }
+
+        $orderId = OrderService::create([
+            'userid'        => $userId,
+            'service_id'    => $serviceId,
+            'provider_slug' => $providerSlug,
+            'canonical_id'  => $configOption1 ?: null,
+            'product_code'  => $configOption1 ?: null,
+            'domain'        => $domain,
+            'certtype'      => $configOption1,
+            'status'        => 'Awaiting Configuration',
+            'configdata'    => $configdata,
         ]);
 
-        ActivityLogger::log(
-            'order_created',
-            'order',
-            (string)$orderId,
-            "SSL order #{$orderId} created for service #{$serviceId} (product: {$canonicalId})"
-        );
+        logModuleCall('aio_ssl', 'CreateAccount', [
+            'serviceid'    => $serviceId,
+            'provider'     => $providerSlug,
+            'order_id'     => $orderId,
+            'domain'       => $domain,
+        ], 'success');
 
         return 'success';
 
     } catch (\Exception $e) {
+        logModuleCall('aio_ssl', 'CreateAccount', $params, $e->getMessage());
         return 'Error: ' . $e->getMessage();
     }
 }
 
 /**
- * Suspend account
+ * Suspend account — Check mod_aio_ssl_orders first, fallback tblsslorders
  *
  * @param array $params
  * @return string
@@ -186,11 +237,23 @@ function aio_ssl_CreateAccount(array $params)
 function aio_ssl_SuspendAccount(array $params)
 {
     try {
-        Capsule::table('tblsslorders')
-            ->where('serviceid', $params['serviceid'])
+        $serviceId = $params['serviceid'];
+
+        // Try mod_aio_ssl_orders first
+        $aioOrder = OrderService::getByServiceId($serviceId);
+        if ($aioOrder) {
+            OrderService::updateStatus($aioOrder->id, 'Suspended');
+            return 'success';
+        }
+
+        // Fallback: tblsslorders
+        $affected = Capsule::table('tblsslorders')
+            ->where('serviceid', $serviceId)
             ->where('module', 'aio_ssl')
             ->update(['status' => 'Suspended']);
-        return 'success';
+
+        return $affected >= 0 ? 'success' : 'No SSL order found for this service.';
+
     } catch (\Exception $e) {
         return 'Error: ' . $e->getMessage();
     }
@@ -205,20 +268,34 @@ function aio_ssl_SuspendAccount(array $params)
 function aio_ssl_UnsuspendAccount(array $params)
 {
     try {
-        // Restore to previous status (or Completed)
+        $serviceId = $params['serviceid'];
+
+        // Try mod_aio_ssl_orders first
+        $aioOrder = OrderService::getByServiceId($serviceId);
+        if ($aioOrder && strtolower($aioOrder->status) === 'suspended') {
+            // Restore to Completed (or previous status if stored)
+            $configdata = OrderService::decodeConfigdata($aioOrder->configdata);
+            $restoreStatus = $configdata['_pre_suspend_status'] ?? 'Completed';
+            OrderService::updateStatus($aioOrder->id, $restoreStatus);
+            return 'success';
+        }
+
+        // Fallback: tblsslorders
         Capsule::table('tblsslorders')
-            ->where('serviceid', $params['serviceid'])
+            ->where('serviceid', $serviceId)
             ->where('module', 'aio_ssl')
             ->where('status', 'Suspended')
             ->update(['status' => 'Completed']);
+
         return 'success';
+
     } catch (\Exception $e) {
         return 'Error: ' . $e->getMessage();
     }
 }
 
 /**
- * Terminate account
+ * Terminate account — Attempt provider cancel/revoke, then update local status
  *
  * @param array $params
  * @return string
@@ -226,11 +303,55 @@ function aio_ssl_UnsuspendAccount(array $params)
 function aio_ssl_TerminateAccount(array $params)
 {
     try {
-        Capsule::table('tblsslorders')
-            ->where('serviceid', $params['serviceid'])
-            ->where('module', 'aio_ssl')
-            ->update(['status' => 'Cancelled']);
+        $serviceId = $params['serviceid'];
+        $order = OrderService::findAnyOrderForService($serviceId);
+
+        if (!$order) {
+            return 'success'; // No order to terminate
+        }
+
+        $configdata = OrderService::decodeConfigdata($order->configdata ?? '');
+        $providerSlug = $order->provider_slug ?? $configdata['provider'] ?? '';
+        $remoteId = $order->remote_id ?? $order->remoteid ?? '';
+
+        // Try to cancel/revoke on provider if possible
+        if (!empty($remoteId) && !empty($providerSlug)) {
+            try {
+                $provider = \AioSSL\Core\ProviderRegistry::get($providerSlug);
+                $caps = $provider->getCapabilities();
+                $status = strtolower($order->status ?? '');
+
+                if (in_array($status, ['completed', 'issued', 'active']) && in_array('revoke', $caps)) {
+                    $provider->revokeCertificate($remoteId);
+                } elseif (in_array($status, ['pending', 'processing']) && in_array('cancel', $caps)) {
+                    $provider->cancelOrder($remoteId);
+                }
+            } catch (\Exception $e) {
+                // Log but continue — local termination should still happen
+                logModuleCall('aio_ssl', 'TerminateAccount_provider', [
+                    'serviceid' => $serviceId,
+                    'provider'  => $providerSlug,
+                    'remoteid'  => $remoteId,
+                ], 'Provider action failed: ' . $e->getMessage());
+            }
+        }
+
+        // Update local record
+        if ($order->_source_table === OrderService::TABLE) {
+            OrderService::updateStatus($order->id, 'Cancelled');
+        } else {
+            // Legacy table — update there too
+            try {
+                Capsule::table($order->_source_table)
+                    ->where('id', $order->id)
+                    ->update(['status' => 'Cancelled']);
+            } catch (\Exception $e) {
+                // Ignore — might be read-only
+            }
+        }
+
         return 'success';
+
     } catch (\Exception $e) {
         return 'Error: ' . $e->getMessage();
     }
@@ -248,49 +369,105 @@ function aio_ssl_AdminServicesTabFields(array $params)
     $serviceId = $params['serviceid'];
 
     try {
-        $order = Capsule::table('tblsslorders')
-            ->where('serviceid', $serviceId)
-            ->orderBy('id', 'desc')
-            ->first();
+        $order = OrderService::findAnyOrderForService($serviceId);
 
         if (!$order) {
             $fields['SSL Order'] = '<span class="label label-default">No SSL order found</span>';
             return $fields;
         }
 
+        $configdata = OrderService::decodeConfigdata($order->configdata ?? '');
+        $sourceTable = $order->_source_table ?? 'unknown';
+        $providerSlug = $order->provider_slug ?? $configdata['provider'] ?? '';
+
+        // Legacy module detection
+        if (empty($providerSlug) && !empty($order->module)) {
+            $legacyMap = [
+                'nicsrs_ssl' => 'nicsrs', 'SSLCENTERWHMCS' => 'gogetssl',
+                'thesslstore_ssl' => 'thesslstore', 'ssl2buy' => 'ssl2buy',
+            ];
+            $providerSlug = $legacyMap[$order->module] ?? '';
+        }
+
+        // Source badge (AIO vs Legacy)
+        $isLegacy = ($sourceTable !== OrderService::TABLE);
+        if ($isLegacy) {
+            $fields['⚠️ Legacy Order'] = '<span class="label label-warning">'
+                . 'From <code>' . htmlspecialchars($sourceTable) . '</code> '
+                . '(module: ' . htmlspecialchars($order->module ?? 'N/A') . ')'
+                . '</span> '
+                . '<a href="addonmodules.php?module=aio_ssl_admin&page=orders" class="btn btn-xs btn-info">'
+                . '<i class="fas fa-exchange-alt"></i> Claim to AIO</a>';
+        }
+
         // Provider badge
-        $configdata = json_decode($order->configdata, true) ?: [];
-        $providerSlug = $configdata['provider'] ?? 'unknown';
         $providerColors = [
             'nicsrs' => '#1890ff', 'gogetssl' => '#13c2c2',
             'thesslstore' => '#722ed1', 'ssl2buy' => '#fa8c16',
         ];
         $color = $providerColors[$providerSlug] ?? '#999';
         $fields['Provider'] = '<span class="label" style="background:' . $color . ';color:#fff;">'
-            . htmlspecialchars(strtoupper($providerSlug)) . '</span>';
+            . htmlspecialchars(strtoupper($providerSlug ?: 'Unknown')) . '</span>';
+
+        // Provider tier badge
+        try {
+            $providerRecord = Capsule::table('mod_aio_ssl_providers')
+                ->where('slug', $providerSlug)->first();
+            if ($providerRecord && $providerRecord->tier === 'limited') {
+                $fields['Provider'] .= ' <span class="label label-warning">LIMITED API</span>';
+            }
+        } catch (\Exception $e) {}
 
         // Order info
-        $fields['SSL Order ID'] = '#' . $order->id;
-        $fields['Remote ID'] = $order->remoteid ?: '—';
-        $fields['Status'] = '<span class="label label-' . _aio_ssl_status_class($order->status) . '">'
-            . htmlspecialchars($order->status) . '</span>';
-        $fields['Certificate Type'] = htmlspecialchars($order->certtype);
+        $fields['SSL Order ID'] = '#' . $order->id . ' <small>(' . $sourceTable . ')</small>';
 
-        if ($order->module !== 'aio_ssl') {
-            $fields['Migration'] = '<span class="label label-warning">Legacy order (module: '
-                . htmlspecialchars($order->module) . ')</span>';
+        $remoteId = $order->remote_id ?? $order->remoteid ?? '';
+        $fields['Remote ID'] = $remoteId ?: '—';
+
+        // Status
+        $status = $order->status ?? 'Unknown';
+        $statusClass = _aio_ssl_status_class($status);
+        $fields['Status'] = '<span class="label label-' . $statusClass . '">'
+            . htmlspecialchars($status) . '</span>';
+
+        // Domain
+        $domain = $order->domain ?? '';
+        if (empty($domain)) {
+            $domain = $configdata['domain'] ?? $configdata['domainInfo'][0]['domainName'] ?? '';
+        }
+        if (!empty($domain)) {
+            $fields['Domain'] = '<code>' . htmlspecialchars($domain) . '</code>';
         }
 
-        // Dates
-        if ($order->completiondate && $order->completiondate !== '0000-00-00 00:00:00') {
-            $fields['Issued'] = $order->completiondate;
+        // Certificate dates
+        $beginDate = $order->begin_date ?? $configdata['begin_date']
+            ?? $configdata['applyReturn']['beginDate'] ?? '';
+        $endDate = $order->end_date ?? $configdata['end_date']
+            ?? $configdata['applyReturn']['endDate'] ?? '';
+
+        if (!empty($beginDate) && !empty($endDate)) {
+            $fields['Valid Period'] = htmlspecialchars($beginDate) . ' → ' . htmlspecialchars($endDate);
+
+            // Expiry warning
+            if (strtotime($endDate) && strtotime($endDate) < strtotime('+30 days')) {
+                $daysLeft = max(0, (int)((strtotime($endDate) - time()) / 86400));
+                $urgency = $daysLeft <= 7 ? 'danger' : 'warning';
+                $fields['⏰ Expiry'] = '<span class="label label-' . $urgency . '">'
+                    . $daysLeft . ' days remaining</span>';
+            }
         }
-        if (isset($configdata['end_date'])) {
-            $fields['Expires'] = $configdata['end_date'];
-        }
+
+        // Admin link to AIO order detail
+        $detailSource = ($sourceTable === OrderService::TABLE) ? 'aio'
+            : ($sourceTable === 'nicsrs_sslorders' ? 'nicsrs' : 'tblssl');
+
+        $fields[''] = '<a href="addonmodules.php?module=aio_ssl_admin&page=orders'
+            . '&action=detail&id=' . $order->id . '&source=' . $detailSource
+            . '" class="btn btn-sm btn-primary" target="_blank">'
+            . '<i class="fas fa-external-link-alt"></i> View in AIO SSL Manager</a>';
 
     } catch (\Exception $e) {
-        $fields['Error'] = $e->getMessage();
+        $fields['Error'] = '<span class="label label-danger">' . htmlspecialchars($e->getMessage()) . '</span>';
     }
 
     return $fields;
@@ -545,17 +722,18 @@ function aio_ssl_ClientArea(array $params)
 function _aio_ssl_status_class(string $status): string
 {
     $map = [
-        'Completed'              => 'success',
-        'Issued'                 => 'success',
-        'Active'                 => 'success',
-        'Pending'                => 'warning',
-        'Processing'             => 'info',
         'Awaiting Configuration' => 'default',
-        'Cancelled'              => 'danger',
-        'Expired'                => 'danger',
-        'Rejected'               => 'danger',
-        'Revoked'                => 'danger',
-        'Suspended'              => 'warning',
+        'Draft'       => 'default',
+        'Pending'     => 'warning',
+        'Processing'  => 'info',
+        'Completed'   => 'success',
+        'Issued'      => 'success',
+        'Active'      => 'success',
+        'Suspended'   => 'warning',
+        'Cancelled'   => 'danger',
+        'Expired'     => 'danger',
+        'Revoked'     => 'danger',
+        'Rejected'    => 'danger',
     ];
     return $map[$status] ?? 'default';
 }

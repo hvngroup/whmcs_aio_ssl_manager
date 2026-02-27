@@ -137,7 +137,9 @@ class ActionController
     // ═══════════════════════════════════════════════════════════════
 
     /**
-     * Submit SSL certificate application
+     * Submit certificate application to provider
+     *
+     * Flow: validate → resolve provider → build params → placeOrder → update order
      */
     public static function submitApply(array $params): array
     {
@@ -146,132 +148,172 @@ class ActionController
             $order = ProviderBridge::getOrder($serviceId);
 
             if (!$order) {
-                return ['success' => false, 'message' => 'SSL order not found.'];
+                return ['success' => false, 'message' => 'No SSL order found.'];
             }
 
-            if ($order->status !== 'Awaiting Configuration') {
-                return ['success' => false, 'message' => 'Order is not awaiting configuration.'];
+            $status = strtolower($order->status ?? '');
+            if (!in_array($status, ['awaiting configuration', 'draft'])) {
+                return ['success' => false, 'message' => 'Order is not in configurable state (current: ' . $order->status . ')'];
             }
 
-            $csr = $_POST['csr'] ?? '';
-            $dcvMethod = $_POST['dcv_method'] ?? 'email';
-            $dcvEmail = $_POST['dcv_email'] ?? '';
+            // Get form data
+            $formData = $_POST['data'] ?? $_POST;
+            if (is_string($formData)) {
+                $formData = json_decode($formData, true) ?: [];
+            }
 
+            // ── Validate CSR ──
+            $csr = $formData['csr'] ?? '';
             if (empty($csr)) {
                 return ['success' => false, 'message' => 'CSR is required.'];
             }
 
-            // Resolve provider
-            $provider = ProviderBridge::getProvider($serviceId);
-            $slug = $provider->getSlug();
-
-            // Get provider-specific product code
-            $configdata = json_decode($order->configdata, true) ?: [];
-            $canonicalId = $configdata['canonical_id'] ?? '';
-            $productCode = ProviderBridge::getProviderProductCode($canonicalId, $slug);
-
-            if (empty($productCode)) {
-                return ['success' => false, 'message' => "No product mapping found for {$canonicalId} on {$slug}."];
+            if (strpos($csr, '-----BEGIN CERTIFICATE REQUEST-----') === false &&
+                strpos($csr, '-----BEGIN NEW CERTIFICATE REQUEST-----') === false) {
+                return ['success' => false, 'message' => 'Invalid CSR format.'];
             }
 
-            // Build order parameters
+            // ── Resolve provider ──
+            $configdata = OrderService::decodeConfigdata($order->configdata ?? '');
+            $slug = ProviderBridge::resolveSlugFromOrder($order);
+
+            if (empty($slug)) {
+                return ['success' => false, 'message' => 'Provider not configured.'];
+            }
+
+            $provider = ProviderRegistry::get($slug);
+
+            // ── Build order params ──
+            $productCode = $order->certtype ?? $order->product_code
+                ?? $configdata['canonical'] ?? $params['configoption1'] ?? '';
+
+            // Billing cycle → period mapping
+            $hosting = Capsule::table('tblhosting')->find($serviceId);
+            $billingCycle = $hosting ? $hosting->billingcycle : 'Annually';
+
+            $periodMap = [
+                'Free Account'  => 1,
+                'One Time'      => 1,
+                'Monthly'       => 1,
+                'Quarterly'     => 1,
+                'Semi-Annually' => 1,
+                'Annually'      => 1,
+                'Biennially'    => 2,
+                'Triennially'   => 3,
+            ];
+            $period = $periodMap[$billingCycle] ?? 1;
+
+            // DCV method
+            $dcvMethod = $formData['dcv_method'] ?? $formData['dcvMethod'] ?? 'email';
+
+            // Domain info
+            $domains = $formData['domains'] ?? $formData['domainInfo'] ?? [];
+            if (empty($domains)) {
+                $domain = $order->domain ?? '';
+                if (!empty($domain)) {
+                    $domains = [['domainName' => $domain, 'dcvMethod' => $dcvMethod]];
+                }
+            }
+
+            // Approver email (for EMAIL DCV)
+            $approverEmail = $formData['approver_email'] ?? $formData['approveremail'] ?? '';
+
+            // Contact info (OV/EV)
+            $contacts = [];
+            if (!empty($formData['Administrator']) || !empty($formData['admin'])) {
+                $contacts['admin'] = $formData['Administrator'] ?? $formData['admin'] ?? [];
+                $contacts['tech']  = $formData['tech'] ?? $formData['Administrator'] ?? $contacts['admin'];
+            }
+
+            // Organization info (OV/EV)
+            $orgInfo = $formData['organizationInfo'] ?? $formData['org'] ?? [];
+
+            // ── Build provider-specific params ──
             $orderParams = [
-                'product_code' => $productCode,
-                'period'       => (int)($_POST['period'] ?? 12),
-                'csr'          => $csr,
-                'server_type'  => (int)($_POST['server_type'] ?? -1),
-                'dcv_method'   => $dcvMethod,
-                'dcv_email'    => $dcvEmail,
+                'product_code'   => $productCode,
+                'csr'            => $csr,
+                'period'         => $period,
+                'dcv_method'     => $dcvMethod,
+                'domains'        => $domains,
+                'approver_email' => $approverEmail,
+                'contacts'       => $contacts,
+                'org_info'       => $orgInfo,
+                'server_count'   => -1,
             ];
 
-            // Domains from CSR
-            $csrSubject = openssl_csr_get_subject($csr, true);
-            $domain = $csrSubject['CN'] ?? '';
-            if (!empty($domain)) {
-                $orderParams['domains'] = [$domain];
+            // Store private key if generated locally
+            $privateKey = $formData['private_key'] ?? $configdata['private_key'] ?? '';
+
+            // ── Validate with provider ──
+            if (method_exists($provider, 'validateOrder')) {
+                $validation = $provider->validateOrder($orderParams);
+                if (!empty($validation['errors'])) {
+                    return [
+                        'success' => false,
+                        'message' => 'Validation failed: ' . implode(', ', $validation['errors']),
+                    ];
+                }
             }
 
-            // SAN domains
-            $sanDomains = $_POST['san_domains'] ?? '';
-            if (!empty($sanDomains)) {
-                $sans = array_filter(array_map('trim', explode("\n", $sanDomains)));
-                $orderParams['domains'] = array_merge($orderParams['domains'] ?? [], $sans);
-            }
-
-            // OV/EV contact info
-            if (!empty($_POST['admin_first_name'])) {
-                $orderParams['admin_contact'] = [
-                    'first_name' => $_POST['admin_first_name'] ?? '',
-                    'last_name'  => $_POST['admin_last_name'] ?? '',
-                    'email'      => $_POST['admin_email'] ?? '',
-                    'phone'      => $_POST['admin_phone'] ?? '',
-                    'title'      => $_POST['admin_title'] ?? '',
-                ];
-            }
-
-            if (!empty($_POST['org_name'])) {
-                $orderParams['org_info'] = [
-                    'name'    => $_POST['org_name'] ?? '',
-                    'city'    => $_POST['org_city'] ?? '',
-                    'state'   => $_POST['org_state'] ?? '',
-                    'country' => $_POST['org_country'] ?? '',
-                    'zip'     => $_POST['org_zip'] ?? '',
-                    'phone'   => $_POST['org_phone'] ?? '',
-                    'address' => $_POST['org_address'] ?? '',
-                ];
-            }
-
-            // Validate order
-            $validation = $provider->validateOrder($orderParams);
-            if (!$validation['valid']) {
-                return [
-                    'success' => false,
-                    'message' => 'Validation failed: ' . implode(', ', $validation['errors']),
-                ];
-            }
-
-            // Place order
+            // ── Place order with provider ──
             $result = $provider->placeOrder($orderParams);
 
-            // Update tblsslorders
+            if (empty($result['order_id']) && empty($result['success'])) {
+                return [
+                    'success' => false,
+                    'message' => $result['message'] ?? 'Provider failed to place order.',
+                ];
+            }
+
+            // ── Update order record ──
+            $remoteId = $result['order_id'] ?? $result['remote_id'] ?? '';
+
+            $newConfigdata = array_merge($configdata, [
+                'provider'        => $slug,
+                'csr'             => $csr,
+                'private_key'     => $privateKey,
+                'dcv_method'      => $dcvMethod,
+                'domains'         => $domains,
+                'contacts'        => $contacts,
+                'org_info'        => $orgInfo,
+                'applyReturn'     => $result,
+                'submitted_at'    => date('Y-m-d H:i:s'),
+                'isDraft'         => false,
+            ]);
+
             $updateData = [
-                'remoteid' => $result['order_id'],
-                'status'   => 'Pending',
+                'status'     => 'Pending',
+                'configdata' => json_encode($newConfigdata, JSON_UNESCAPED_UNICODE),
             ];
 
-            $configdata['provider']     = $slug;
-            $configdata['product_code'] = $productCode;
-            $configdata['csr']          = $csr;
-            $configdata['dcv_method']   = $dcvMethod;
-            $configdata['dcv_email']    = $dcvEmail;
-            $configdata['domains']      = $orderParams['domains'] ?? [$domain];
-            $configdata['applied_at']   = date('Y-m-d H:i:s');
-            $configdata['order_extra']  = $result['extra'] ?? [];
-
-            if (isset($orderParams['admin_contact'])) {
-                $configdata['admin_contact'] = $orderParams['admin_contact'];
-            }
-            if (isset($orderParams['org_info'])) {
-                $configdata['org_info'] = $orderParams['org_info'];
+            // Set remote_id based on table
+            if (($order->_source_table ?? '') === 'mod_aio_ssl_orders') {
+                $updateData['remote_id'] = $remoteId;
+            } else {
+                $updateData['remoteid'] = $remoteId;
             }
 
-            $updateData['configdata'] = json_encode($configdata);
-            Capsule::table('tblsslorders')->where('id', $order->id)->update($updateData);
+            ProviderBridge::updateOrder($order, $updateData);
 
-            ActivityLogger::log('cert_applied', 'order', (string)$order->id,
-                "Certificate applied via {$slug} (remote: {$result['order_id']})");
+            logModuleCall('aio_ssl', 'submitApply', [
+                'serviceid' => $serviceId,
+                'provider'  => $slug,
+                'product'   => $productCode,
+                'remote_id' => $remoteId,
+            ], 'Order placed successfully');
 
             return [
-                'success'  => true,
-                'message'  => 'Certificate application submitted successfully.',
-                'order_id' => $result['order_id'],
-                'status'   => $result['status'],
+                'success'   => true,
+                'message'   => 'Certificate order submitted successfully.',
+                'order_id'  => $remoteId,
+                'status'    => 'Pending',
             ];
 
         } catch (UnsupportedOperationException $e) {
             return ['success' => false, 'message' => $e->getMessage()];
         } catch (\Exception $e) {
-            return ['success' => false, 'message' => 'Application failed: ' . $e->getMessage()];
+            logModuleCall('aio_ssl', 'submitApply_error', $params, $e->getMessage());
+            return ['success' => false, 'message' => 'Submit failed: ' . $e->getMessage()];
         }
     }
 
@@ -325,44 +367,66 @@ class ActionController
     {
         try {
             $order = ProviderBridge::getOrder($params['serviceid']);
-            if (!$order || empty($order->remoteid)) {
-                return ['success' => false, 'message' => 'No active order found.'];
+            if (!$order) {
+                return ['success' => false, 'message' => 'No SSL order found.'];
             }
 
-            $configdata = json_decode($order->configdata, true) ?: [];
-            $slug = $configdata['provider'] ?? '';
+            $remoteId = $order->remote_id ?? $order->remoteid ?? '';
+            if (empty($remoteId)) {
+                return ['success' => false, 'message' => 'No remote order ID. Certificate may not be submitted yet.'];
+            }
 
+            $slug = ProviderBridge::resolveSlugFromOrder($order);
             if (empty($slug)) {
                 return ['success' => false, 'message' => 'Provider not resolved.'];
             }
 
             $provider = ProviderRegistry::get($slug);
-            $status = $provider->getOrderStatus($order->remoteid);
+            $status = $provider->getOrderStatus($remoteId);
 
-            $update = ['status' => $status['status']];
+            // Build update data
+            $configdata = OrderService::decodeConfigdata($order->configdata ?? '');
+            $updateData = ['status' => $status['status'] ?? $order->status];
 
-            if ($status['status'] === 'Completed' && !empty($status['certificate'])) {
-                $configdata['cert']        = $status['certificate']['cert'] ?? '';
-                $configdata['ca']          = $status['certificate']['ca'] ?? '';
-                $configdata['private_key'] = $status['certificate']['private_key'] ?? ($configdata['private_key'] ?? '');
-                $update['completiondate']  = date('Y-m-d H:i:s');
+            // Certificate data (if issued)
+            $isCompleted = in_array($status['status'] ?? '', ['Completed', 'Issued', 'Active']);
+            if ($isCompleted && !empty($status['certificate'])) {
+                $configdata['cert']        = $status['certificate']['cert'] ?? $status['certificate']['crt_code'] ?? '';
+                $configdata['ca']          = $status['certificate']['ca'] ?? $status['certificate']['ca_code'] ?? '';
+                $configdata['private_key'] = $status['certificate']['private_key']
+                    ?? $configdata['private_key'] ?? '';
+                $updateData['completiondate'] = date('Y-m-d H:i:s');
             }
 
-            if (!empty($status['begin_date'])) $configdata['begin_date'] = $status['begin_date'];
-            if (!empty($status['end_date']))   $configdata['end_date'] = $status['end_date'];
+            // Dates
+            if (!empty($status['begin_date'])) {
+                $configdata['begin_date'] = $status['begin_date'];
+                $updateData['begin_date'] = $status['begin_date'];
+            }
+            if (!empty($status['end_date'])) {
+                $configdata['end_date'] = $status['end_date'];
+                $updateData['end_date'] = $status['end_date'];
+            }
+
+            // DCV status
             if (!empty($status['domains']))    $configdata['domains'] = $status['domains'];
             if (!empty($status['dcv_status'])) $configdata['dcv_status'] = $status['dcv_status'];
+            if (!empty($status['dcv_info']))   $configdata['dcv_info'] = $status['dcv_info'];
 
             $configdata['last_refresh'] = date('Y-m-d H:i:s');
-            $update['configdata'] = json_encode($configdata);
+            $configdata['api_status'] = $status['status'] ?? '';
+            $updateData['configdata'] = json_encode($configdata, JSON_UNESCAPED_UNICODE);
 
-            Capsule::table('tblsslorders')->where('id', $order->id)->update($update);
+            // Write to CORRECT table
+            ProviderBridge::updateOrder($order, $updateData);
 
             return [
                 'success'    => true,
-                'status'     => $status['status'],
-                'message'    => 'Status refreshed: ' . $status['status'],
+                'status'     => $status['status'] ?? '',
+                'message'    => 'Status refreshed: ' . ($status['status'] ?? 'Unknown'),
                 'has_cert'   => !empty($configdata['cert']),
+                'begin_date' => $configdata['begin_date'] ?? '',
+                'end_date'   => $configdata['end_date'] ?? '',
             ];
 
         } catch (\Exception $e) {
@@ -371,7 +435,10 @@ class ActionController
     }
 
     /**
-     * Download certificate (force download as ZIP or individual files)
+     * Download certificate in specified format
+     *
+     * Formats: apache (CRT+CA+Key ZIP), nginx (PEM), key (private key only),
+     *          all (complete ZIP with all formats)
      */
     public static function downloadCert(array $params): array
     {
@@ -381,71 +448,156 @@ class ActionController
                 return ['success' => false, 'message' => 'Order not found.'];
             }
 
-            $configdata = json_decode($order->configdata, true) ?: [];
-            $format = $_GET['format'] ?? $_POST['format'] ?? 'zip';
+            $configdata = OrderService::decodeConfigdata($order->configdata ?? '');
+            $slug = ProviderBridge::resolveSlugFromOrder($order);
+            $remoteId = $order->remote_id ?? $order->remoteid ?? '';
 
-            // Check if cert is in configdata
-            $cert = $configdata['cert'] ?? '';
-            $ca = $configdata['ca'] ?? '';
-            $privateKey = $configdata['private_key'] ?? '';
+            // Check capability
+            if (!empty($slug)) {
+                try {
+                    $provider = ProviderRegistry::get($slug);
+                    $caps = $provider->getCapabilities();
+                    if (!in_array('download', $caps)) {
+                        return ['success' => false, 'message' => 'This provider does not support certificate download. Use the provider portal.'];
+                    }
+                } catch (\Exception $e) {}
+            }
 
-            // If no cert cached, try to download from provider
-            if (empty($cert) && !empty($order->remoteid)) {
-                $slug = $configdata['provider'] ?? '';
-                if (!empty($slug)) {
-                    try {
-                        $provider = ProviderRegistry::get($slug);
-                        $certData = $provider->downloadCertificate($order->remoteid);
-                        $cert = $certData['cert'] ?? '';
-                        $ca = $certData['ca'] ?? '';
-                        if (!empty($certData['private_key'])) {
-                            $privateKey = $certData['private_key'];
-                        }
+            // Get cert data — from configdata or from provider API
+            $cert = $configdata['cert'] ?? $configdata['applyReturn']['certificate'] ?? '';
+            $ca   = $configdata['ca'] ?? $configdata['applyReturn']['caCertificate'] ?? '';
+            $key  = $configdata['private_key'] ?? '';
 
-                        // Cache in configdata
+            // If no cert in configdata, try fetching from provider
+            if (empty($cert) && !empty($remoteId) && !empty($slug)) {
+                try {
+                    $provider = ProviderRegistry::get($slug);
+                    $certData = $provider->downloadCertificate($remoteId);
+                    $cert = $certData['cert'] ?? $certData['crt_code'] ?? '';
+                    $ca   = $certData['ca'] ?? $certData['ca_code'] ?? '';
+
+                    // Save to configdata for future downloads
+                    if (!empty($cert)) {
                         $configdata['cert'] = $cert;
                         $configdata['ca'] = $ca;
-                        Capsule::table('tblsslorders')
-                            ->where('id', $order->id)
-                            ->update(['configdata' => json_encode($configdata)]);
-                    } catch (\Exception $e) {
-                        return ['success' => false, 'message' => 'Download failed: ' . $e->getMessage()];
+                        ProviderBridge::updateOrder($order, [
+                            'configdata' => json_encode($configdata, JSON_UNESCAPED_UNICODE),
+                        ]);
                     }
+                } catch (\Exception $e) {
+                    return ['success' => false, 'message' => 'Download failed: ' . $e->getMessage()];
                 }
             }
 
             if (empty($cert)) {
-                return ['success' => false, 'message' => 'Certificate not yet available.'];
+                return ['success' => false, 'message' => 'Certificate not available yet.'];
             }
 
-            $domain = $configdata['domains'][0] ?? 'certificate';
-            $safeDomain = preg_replace('/[^a-zA-Z0-9.-]/', '_', $domain);
+            // Determine format
+            $format = $_REQUEST['format'] ?? $_POST['format'] ?? 'all';
+            $domain = $order->domain ?? $configdata['domain'] ?? 'certificate';
+            $safeDomain = preg_replace('/[^a-zA-Z0-9._-]/', '_', $domain);
 
-            // Build file data based on format
-            switch ($format) {
-                case 'cert':
-                    self::sendFile("{$safeDomain}.crt", $cert, 'application/x-x509-ca-cert');
-                    return ['success' => true];
-                case 'ca':
-                    self::sendFile("{$safeDomain}.ca-bundle", $ca, 'application/x-x509-ca-cert');
-                    return ['success' => true];
+            // Build download response
+            switch (strtolower($format)) {
                 case 'key':
-                    if (empty($privateKey)) {
+                    if (empty($key)) {
                         return ['success' => false, 'message' => 'Private key not available.'];
                     }
-                    self::sendFile("{$safeDomain}.key", $privateKey, 'application/x-pem-file');
-                    return ['success' => true];
+                    return self::sendFileDownload("{$safeDomain}.key", $key, 'application/x-pem-file');
+
+                case 'crt':
+                case 'apache':
+                    return self::buildZipDownload($safeDomain, [
+                        "{$safeDomain}.crt" => $cert,
+                        "{$safeDomain}.ca-bundle" => $ca,
+                        "{$safeDomain}.key" => $key,
+                    ]);
+
                 case 'pem':
-                    $pem = $cert . "\n" . $ca;
-                    self::sendFile("{$safeDomain}.pem", $pem, 'application/x-pem-file');
-                    return ['success' => true];
-                default: // zip
-                    return self::downloadAsZip($safeDomain, $cert, $ca, $privateKey);
+                case 'nginx':
+                    $pem = trim($cert) . "\n" . trim($ca);
+                    return self::buildZipDownload($safeDomain, [
+                        "{$safeDomain}.pem" => $pem,
+                        "{$safeDomain}.key" => $key,
+                    ]);
+
+                case 'all':
+                default:
+                    $pem = trim($cert) . "\n" . trim($ca);
+                    return self::buildZipDownload($safeDomain, [
+                        "{$safeDomain}.crt" => $cert,
+                        "{$safeDomain}.ca-bundle" => $ca,
+                        "{$safeDomain}.pem" => $pem,
+                        "{$safeDomain}.key" => $key,
+                    ]);
             }
 
         } catch (\Exception $e) {
             return ['success' => false, 'message' => 'Download error: ' . $e->getMessage()];
         }
+    }
+
+    /**
+     * Build ZIP file and send as download
+     */
+    private static function buildZipDownload(string $baseName, array $files): array
+    {
+        // Filter empty files
+        $files = array_filter($files, function ($content) {
+            return !empty(trim($content));
+        });
+
+        if (empty($files)) {
+            return ['success' => false, 'message' => 'No certificate files available.'];
+        }
+
+        // If only one file, send directly
+        if (count($files) === 1) {
+            $filename = array_key_first($files);
+            return self::sendFileDownload($filename, reset($files));
+        }
+
+        // Build ZIP
+        $tmpFile = tempnam(sys_get_temp_dir(), 'aio_ssl_');
+        $zip = new \ZipArchive();
+
+        if ($zip->open($tmpFile, \ZipArchive::CREATE | \ZipArchive::OVERWRITE) !== true) {
+            return ['success' => false, 'message' => 'Failed to create ZIP archive.'];
+        }
+
+        foreach ($files as $filename => $content) {
+            $zip->addFromString($filename, $content);
+        }
+        $zip->close();
+
+        $zipContent = file_get_contents($tmpFile);
+        unlink($tmpFile);
+
+        // Send download
+        while (ob_get_level()) ob_end_clean();
+
+        header('Content-Type: application/zip');
+        header('Content-Disposition: attachment; filename="' . $baseName . '.zip"');
+        header('Content-Length: ' . strlen($zipContent));
+        header('Cache-Control: no-cache, must-revalidate');
+        echo $zipContent;
+        exit;
+    }
+
+    /**
+     * Send single file download
+     */
+    private static function sendFileDownload(string $filename, string $content, string $mimeType = 'application/octet-stream'): array
+    {
+        while (ob_get_level()) ob_end_clean();
+
+        header('Content-Type: ' . $mimeType);
+        header('Content-Disposition: attachment; filename="' . $filename . '"');
+        header('Content-Length: ' . strlen($content));
+        header('Cache-Control: no-cache, must-revalidate');
+        echo $content;
+        exit;
     }
 
     /**
@@ -504,8 +656,18 @@ class ActionController
     {
         try {
             $order = ProviderBridge::getOrder($params['serviceid']);
-            if (!$order || empty($order->remoteid)) {
+            if (!$order || empty($order->remoteid ?? $order->remote_id ?? '')) {
                 return ['success' => false, 'message' => 'No active order found.'];
+            }
+
+            $slug = ProviderBridge::resolveSlugFromOrder($order);
+            $provider = ProviderRegistry::get($slug);
+            $remoteId = $order->remote_id ?? $order->remoteid ?? '';
+
+            // Check capability
+            $caps = $provider->getCapabilities();
+            if (!in_array('reissue', $caps)) {
+                return ['success' => false, 'message' => 'This provider does not support reissue.'];
             }
 
             $csr = $_POST['csr'] ?? '';
@@ -513,30 +675,36 @@ class ActionController
                 return ['success' => false, 'message' => 'New CSR is required for reissue.'];
             }
 
-            $configdata = json_decode($order->configdata, true) ?: [];
-            $slug = $configdata['provider'] ?? '';
-            $provider = ProviderRegistry::get($slug);
+            $dcvMethod = $_POST['dcv_method'] ?? 'email';
+            $approverEmail = $_POST['approver_email'] ?? '';
 
-            $result = $provider->reissueCertificate($order->remoteid, [
-                'csr'        => $csr,
-                'dcv_method' => $_POST['dcv_method'] ?? 'email',
-                'dcv_email'  => $_POST['dcv_email'] ?? '',
+            $result = $provider->reissueCertificate($remoteId, [
+                'csr'            => $csr,
+                'dcv_method'     => $dcvMethod,
+                'approver_email' => $approverEmail,
             ]);
 
-            if ($result['success']) {
-                $configdata['reissue_csr'] = $csr;
-                $configdata['reissue_at'] = date('Y-m-d H:i:s');
-                Capsule::table('tblsslorders')->where('id', $order->id)->update([
-                    'status'     => 'Processing',
-                    'configdata' => json_encode($configdata),
-                ]);
-                ActivityLogger::log('cert_reissued', 'order', (string)$order->id, 'Reissue submitted');
+            // Update configdata
+            $configdata = OrderService::decodeConfigdata($order->configdata ?? '');
+            $configdata['csr'] = $csr;
+            $configdata['reissue_date'] = date('Y-m-d H:i:s');
+            $configdata['reissue_result'] = $result;
+
+            // Store new private key if provided
+            if (!empty($_POST['private_key'])) {
+                $configdata['private_key'] = $_POST['private_key'];
             }
 
-            return $result;
+            ProviderBridge::updateOrder($order, [
+                'status'     => 'Pending',
+                'configdata' => json_encode($configdata, JSON_UNESCAPED_UNICODE),
+            ]);
 
-        } catch (UnsupportedOperationException $e) {
-            return ['success' => false, 'message' => $e->getMessage()];
+            return [
+                'success' => true,
+                'message' => 'Reissue request submitted. Complete domain validation to receive new certificate.',
+            ];
+
         } catch (\Exception $e) {
             return ['success' => false, 'message' => 'Reissue failed: ' . $e->getMessage()];
         }
@@ -549,38 +717,52 @@ class ActionController
     {
         try {
             $order = ProviderBridge::getOrder($params['serviceid']);
-            if (!$order || empty($order->remoteid)) {
-                return ['success' => false, 'message' => 'No active order found.'];
+            if (!$order) {
+                return ['success' => false, 'message' => 'No order found.'];
             }
 
-            $configdata = json_decode($order->configdata, true) ?: [];
-            $slug = $configdata['provider'] ?? '';
+            $slug = ProviderBridge::resolveSlugFromOrder($order);
             $provider = ProviderRegistry::get($slug);
+            $remoteId = $order->remote_id ?? $order->remoteid ?? '';
 
-            $result = $provider->renewCertificate($order->remoteid, [
-                'product_code' => $configdata['product_code'] ?? '',
-                'csr'          => $_POST['csr'] ?? $configdata['csr'] ?? '',
-                'period'       => (int)($_POST['period'] ?? 12),
-                'dcv_method'   => $_POST['dcv_method'] ?? $configdata['dcv_method'] ?? 'email',
-                'dcv_email'    => $_POST['dcv_email'] ?? '',
+            $caps = $provider->getCapabilities();
+            if (!in_array('renew', $caps)) {
+                return ['success' => false, 'message' => 'This provider does not support renewal.'];
+            }
+
+            $configdata = OrderService::decodeConfigdata($order->configdata ?? '');
+            $csr = $_POST['csr'] ?? $configdata['csr'] ?? '';
+
+            // Constraint C7: TheSSLStore renew = new order with isRenewalOrder flag
+            $renewParams = [
+                'csr'              => $csr,
+                'dcv_method'       => $_POST['dcv_method'] ?? $configdata['dcv_method'] ?? 'email',
+                'approver_email'   => $_POST['approver_email'] ?? '',
+                'isRenewalOrder'   => true,
+                'original_order_id'=> $remoteId,
+            ];
+
+            $result = $provider->renewCertificate($remoteId, $renewParams);
+
+            $newRemoteId = $result['order_id'] ?? $result['remote_id'] ?? $remoteId;
+            $configdata['renew_date'] = date('Y-m-d H:i:s');
+            $configdata['renew_result'] = $result;
+            $configdata['previous_remote_id'] = $remoteId;
+
+            ProviderBridge::updateOrder($order, [
+                'status'     => 'Pending',
+                'configdata' => json_encode($configdata, JSON_UNESCAPED_UNICODE),
+                ($order->_source_table === 'mod_aio_ssl_orders' ? 'remote_id' : 'remoteid') => $newRemoteId,
             ]);
 
-            if (!empty($result['order_id'])) {
-                $configdata['renewed_from'] = $order->remoteid;
-                Capsule::table('tblsslorders')->where('id', $order->id)->update([
-                    'remoteid'   => $result['order_id'],
-                    'status'     => 'Pending',
-                    'configdata' => json_encode($configdata),
-                ]);
-                ActivityLogger::log('cert_renewed', 'order', (string)$order->id, 'Renewed → ' . $result['order_id']);
-            }
+            return [
+                'success'   => true,
+                'message'   => 'Renewal submitted successfully.',
+                'order_id'  => $newRemoteId,
+            ];
 
-            return ['success' => true, 'message' => 'Renewal submitted.', 'order_id' => $result['order_id'] ?? ''];
-
-        } catch (UnsupportedOperationException $e) {
-            return ['success' => false, 'message' => $e->getMessage()];
         } catch (\Exception $e) {
-            return ['success' => false, 'message' => 'Renewal failed: ' . $e->getMessage()];
+            return ['success' => false, 'message' => 'Renew failed: ' . $e->getMessage()];
         }
     }
 
