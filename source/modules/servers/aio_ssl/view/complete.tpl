@@ -1,7 +1,6 @@
 {* ══════════════════════════════════════════════════════════════════════
    FILE: view/complete.tpl — Issued certificate
-   Adapted from NicSRS ref: complete.tpl
-   NO provider name shown. Capability-aware buttons.
+   Rich info: cert details card, download cards, cert content, actions, help
    ══════════════════════════════════════════════════════════════════════ *}
 
 <link rel="stylesheet" href="{$WEB_ROOT}/modules/servers/aio_ssl/assets/css/ssl-manager.css">
@@ -23,7 +22,7 @@
         <div class="sslm-progress-step completed active"><div class="sslm-progress-icon"><i class="fas fa-certificate"></i></div><div class="sslm-progress-label">{$_LANG.step_issued|default:'Issued'}</div></div>
     </div>
 
-    {* Success Card *}
+    {* Success Status Card *}
     <div class="sslm-status-card">
         <div class="sslm-status-icon success"><i class="fas fa-certificate"></i></div>
         <div class="sslm-status-content">
@@ -32,7 +31,7 @@
         </div>
     </div>
 
-    {* Certificate Info *}
+    {* ── Certificate Info Card ── *}
     <div class="sslm-section">
         <div class="sslm-section-header">
             <h3><i class="fas fa-info-circle"></i> {$_LANG.certificate_info|default:'Certificate Information'}</h3>
@@ -45,8 +44,8 @@
         <div class="sslm-section-body">
             <div class="sslm-info-grid">
                 <div class="sslm-info-item">
-                    <label>{$_LANG.domain|default:'Domain'}</label>
-                    <span><code>{$domain|escape:'html'}</code></span>
+                    <label>{$_LANG.certificate_id|default:'Certificate ID'}</label>
+                    <span class="sslm-code">{$certId|escape:'html'|default:'N/A'}</span>
                 </div>
                 <div class="sslm-info-item">
                     <label>{$_LANG.status|default:'Status'}</label>
@@ -57,8 +56,8 @@
                     <span>{$productCode|escape:'html'}</span>
                 </div>
                 <div class="sslm-info-item">
-                    <label>{$_LANG.certificate_id|default:'Certificate ID'}</label>
-                    <span class="sslm-code">{$remoteId|escape:'html'|default:'N/A'}</span>
+                    <label>{$_LANG.domain|default:'Domain'}</label>
+                    <span><code>{$domain|escape:'html'}</code></span>
                 </div>
                 {if $beginDate}
                 <div class="sslm-info-item">
@@ -76,7 +75,7 @@
         </div>
     </div>
 
-    {* Download Section *}
+    {* ── Download Section ── *}
     {if $canDownload && $hasCert}
     <div class="sslm-section">
         <div class="sslm-section-header">
@@ -103,18 +102,25 @@
                     <button type="button" class="sslm-btn sslm-btn-success sslm-btn-sm"><i class="fas fa-download"></i> {$_LANG.download_all|default:'Download All'}</button>
                 </div>
             </div>
+
+            {if !$hasPrivateKey}
+            <div class="sslm-alert sslm-alert-warning" style="margin-top:20px;">
+                <i class="fas fa-key"></i>
+                <div>
+                    <strong>{$_LANG.private_key_notice|default:'Private Key Not Available'}</strong>
+                    <p style="margin:4px 0 0 0;">{$_LANG.private_key_notice_desc|default:'The private key is not stored in our system. If you generated the CSR elsewhere, use your original private key.'}</p>
+                </div>
+            </div>
+            {/if}
         </div>
     </div>
     {/if}
 
-    {* Certificate Content (Collapsible) *}
-    {if $hasCert}
+    {* ── Certificate Content (Collapsible) ── *}
+    {if $certificate}
     <div class="sslm-section sslm-collapsible collapsed">
         <div class="sslm-section-header" onclick="this.parentElement.classList.toggle('collapsed')" style="cursor:pointer;">
-            <h3>
-                <span><i class="fas fa-file-code"></i> {$_LANG.certificate_content|default:'Certificate Content'}</span>
-                <i class="fas fa-chevron-down sslm-collapse-icon"></i>
-            </h3>
+            <h3><span><i class="fas fa-file-code"></i> {$_LANG.certificate_content|default:'Certificate Content'}</span><i class="fas fa-chevron-down sslm-collapse-icon"></i></h3>
         </div>
         <div class="sslm-section-body">
             <div class="sslm-cert-display">
@@ -124,15 +130,24 @@
                         <i class="fas fa-copy"></i> {$_LANG.copy|default:'Copy'}
                     </button>
                 </div>
-                <div class="sslm-cert-display-body">
-                    <pre id="certContent">{$configData.cert|escape:'html'}</pre>
-                </div>
+                <div class="sslm-cert-display-body"><pre id="certContent">{$certificate|escape:'html'}</pre></div>
             </div>
+            {if $caCertificate}
+            <div class="sslm-cert-display" style="margin-top:16px;">
+                <div class="sslm-cert-display-header">
+                    <span>{$_LANG.ca_bundle|default:'CA Bundle'}</span>
+                    <button type="button" class="sslm-btn sslm-btn-sm sslm-btn-outline" onclick="SSLManager.copyToClipboard(document.getElementById('caContent').textContent)">
+                        <i class="fas fa-copy"></i> {$_LANG.copy|default:'Copy'}
+                    </button>
+                </div>
+                <div class="sslm-cert-display-body"><pre id="caContent">{$caCertificate|escape:'html'}</pre></div>
+            </div>
+            {/if}
         </div>
     </div>
     {/if}
 
-    {* Actions — capability-aware *}
+    {* ── Certificate Actions ── *}
     <div class="sslm-section">
         <div class="sslm-section-header">
             <h3><i class="fas fa-cogs"></i> {$_LANG.certificate_actions|default:'Certificate Actions'}</h3>
@@ -156,7 +171,7 @@
         </div>
     </div>
 
-    {* Help *}
+    {* ── Installation Help ── *}
     <div class="sslm-section">
         <div class="sslm-section-header">
             <h3><i class="fas fa-question-circle"></i> {$_LANG.installation_help|default:'Installation Help'}</h3>
@@ -164,12 +179,12 @@
         <div class="sslm-section-body">
             <div class="sslm-help-grid">
                 <div class="sslm-help-item">
-                    <h4><i class="fas fa-server"></i> Apache</h4>
-                    <p>{$_LANG.apache_help_desc|default:'Upload .crt, .ca-bundle, and .key files. Update your VirtualHost configuration.'}</p>
+                    <h4><i class="fas fa-server"></i> Apache / cPanel</h4>
+                    <p>{$_LANG.apache_help_desc|default:'Upload .crt, .ca-bundle, and .key files via cPanel SSL/TLS or update your VirtualHost configuration.'}</p>
                 </div>
                 <div class="sslm-help-item">
                     <h4><i class="fas fa-cube"></i> Nginx</h4>
-                    <p>{$_LANG.nginx_help_desc|default:'Use the .pem file (combined cert) with your .key file in server block.'}</p>
+                    <p>{$_LANG.nginx_help_desc|default:'Use the .pem file (combined cert + CA) with your .key file in the server block configuration.'}</p>
                 </div>
                 <div class="sslm-help-item">
                     <h4><i class="fas fa-life-ring"></i> {$_LANG.help_installation_title|default:'SSL Installation Service'}</h4>

@@ -1,5 +1,6 @@
 {**
  * AIO SSL Manager — Apply Certificate
+ * Adapted from NicSRS ref: single-page form with sections
  * Sections: 1.Domain/SAN → 2.CSR → 3.Contacts(OV/EV) → 4.DCV → Submit
  * NO provider name shown to client
  *}
@@ -40,13 +41,24 @@
         </div>
     </div>
 
-    {* ── Draft Notice ── *}
+    {* ── Draft Notice / Welcome ── *}
     {if $hasDraft}
-    <div class="sslm-alert sslm-alert-info" id="draft-notice">
-        <i class="fas fa-save"></i>
-        <div>
-            <strong>{$_LANG.draft_found|default:'Draft Saved'}</strong>
-            <p>{$_LANG.draft_resume|default:'Your previous progress has been saved. You can continue where you left off.'}</p>
+    <div class="sslm-status-card">
+        <div class="sslm-status-icon info"><i class="fas fa-save"></i></div>
+        <div class="sslm-status-content">
+            <div class="sslm-status-title">{$_LANG.draft_found|default:'Draft Saved'}</div>
+            <div class="sslm-status-desc">
+                {$_LANG.draft_resume|default:'Your previous progress has been saved. You can continue where you left off.'}
+                {if $lastSaved}<br><small>{$_LANG.last_saved|default:'Last saved'}: {$lastSaved|escape:'html'}</small>{/if}
+            </div>
+        </div>
+    </div>
+    {else}
+    <div class="sslm-status-card">
+        <div class="sslm-status-icon info"><i class="fas fa-edit"></i></div>
+        <div class="sslm-status-content">
+            <div class="sslm-status-title">{$_LANG.configure_your_cert|default:'Configure Your SSL Certificate'}</div>
+            <div class="sslm-status-desc">{$_LANG.apply_welcome|default:'Please fill in the information below to request your SSL certificate. Fields marked with * are required. You can save a draft at any time and come back later.'}</div>
         </div>
     </div>
     {/if}
@@ -69,6 +81,27 @@
                 <h3><span class="sslm-step-number">1</span> {$_LANG.domain_info|default:'Domain Information'}</h3>
             </div>
             <div class="sslm-section-body">
+                <p class="sslm-help-text" style="margin-bottom:16px;">
+                    <i class="fas fa-lightbulb"></i>
+                    {$_LANG.domain_section_guide|default:'Enter the domain name(s) you want to protect and select a validation method. For Email validation, options will appear based on your domain.'}
+                </p>
+
+                {* Renewal Option *}
+                <div class="sslm-form-group">
+                    <label>{$_LANG.is_renew|default:'Is this a renewal?'}</label>
+                    <div class="sslm-radio-group">
+                        <label class="sslm-radio">
+                            <input type="radio" name="isRenew" value="0" {if !$isRenew || $isRenew eq '0'}checked{/if}>
+                            <span>{$_LANG.is_renew_option_new|default:'No, new certificate'}</span>
+                        </label>
+                        <label class="sslm-radio">
+                            <input type="radio" name="isRenew" value="1" {if $isRenew eq '1'}checked{/if}>
+                            <span>{$_LANG.is_renew_option_renew|default:'Yes, renewal'}</span>
+                        </label>
+                    </div>
+                    <div class="sslm-form-hint">{$_LANG.is_renew_des|default:'Select "Yes" if renewing an existing certificate to receive bonus validity time.'}</div>
+                </div>
+
                 <div class="sslm-form-row">
                     <div class="sslm-form-group sslm-col-full">
                         <label>{$_LANG.primary_domain|default:'Primary Domain'}</label>

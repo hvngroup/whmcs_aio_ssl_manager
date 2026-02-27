@@ -12,4 +12,7 @@
             <div class="sslm-status-desc">{$errorMessage|escape:'html'}</div>
         </div>
     </div>
+    <div style="margin-top:16px;">
+        <a href="{$WEB_ROOT}/submitticket.php" class="sslm-btn sslm-btn-outline"><i class="fas fa-ticket-alt"></i> {$_LANG.contact_support|default:'Contact Support'}</a>
+    </div>
 </div>

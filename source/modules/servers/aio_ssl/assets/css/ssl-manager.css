@@ -218,6 +218,42 @@
 .sslm-card-header-actions { margin-left: auto; }
 .sslm-section-header { display: flex; align-items: center; }
 
+/* ── Section with colored border (warning card) ── */
+.sslm-card-warning { border-left: 3px solid var(--sslm-warning); }
+.sslm-card-warning .sslm-section-header { background: #fffbe6; }
+
+/* ── Domain Validation Status Row ── */
+.sslm-domain-status-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--sslm-border); }
+.sslm-domain-status-row:last-child { border-bottom: none; }
+.sslm-domain-status-icon { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; }
+.sslm-domain-status-icon.verified { background: #f6ffed; color: var(--sslm-success); }
+.sslm-domain-status-icon.pending { background: #fffbe6; color: var(--sslm-warning); }
+.sslm-domain-status-content { flex: 1; }
+.sslm-domain-name { font-size: 14px; font-weight: 500; margin-bottom: 4px; }
+.sslm-domain-meta { display: flex; gap: 6px; flex-wrap: wrap; }
+.sslm-domain-status-actions { flex-shrink: 0; }
+.sslm-badge-sm { font-size: 10px; padding: 1px 6px; }
+
+/* ── DCV Instruction Block ── */
+.sslm-instruction-block { padding: 16px; background: var(--sslm-bg); border-radius: var(--sslm-radius); }
+.sslm-instruction-block h4 { margin: 0 0 12px; font-size: 14px; display: flex; align-items: center; gap: 8px; }
+.sslm-steps-list { margin: 0; padding-left: 20px; }
+.sslm-steps-list li { margin-bottom: 8px; font-size: 13px; line-height: 1.6; color: var(--sslm-text-secondary); }
+.sslm-steps-list li:last-child { margin-bottom: 0; }
+
+/* ── Action Cards Grid (status.tpl) ── */
+.sslm-action-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+.sslm-action-card { padding: 20px; background: var(--sslm-bg-white); border: 1px solid var(--sslm-border); border-radius: var(--sslm-radius); text-align: center; transition: var(--sslm-transition); }
+.sslm-action-card:hover { box-shadow: var(--sslm-shadow-hover); transform: translateY(-2px); }
+.sslm-action-card-icon { width: 48px; height: 48px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 20px; margin: 0 auto 12px; }
+.sslm-action-card-title { font-size: 14px; font-weight: 600; margin-bottom: 6px; }
+.sslm-action-card-desc { font-size: 12px; color: var(--sslm-text-secondary); margin-bottom: 12px; line-height: 1.5; }
+
+/* ── Radio Group ── */
+.sslm-radio-group { display: flex; gap: 16px; flex-wrap: wrap; }
+.sslm-radio { display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px; }
+.sslm-radio input[type="radio"] { accent-color: var(--sslm-primary); }
+
 /* ── Form Actions ── */
 .sslm-form-actions { display: flex; gap: 10px; justify-content: flex-end; padding: 20px 0; margin-top: 8px; }
 

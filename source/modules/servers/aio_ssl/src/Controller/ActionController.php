@@ -149,134 +149,203 @@ class ActionController
             $order = ProviderBridge::getOrder($serviceId);
 
             if (!$order) {
-                return ['success' => false, 'message' => 'No SSL order found.'];
+                return ['success' => false, 'message' => 'SSL order not found.'];
             }
 
             $status = strtolower($order->status ?? '');
             if (!in_array($status, ['awaiting configuration', 'draft'])) {
-                return ['success' => false, 'message' => 'Order is not in configurable state (current: ' . $order->status . ')'];
+                return ['success' => false, 'message' => 'Order is not awaiting configuration (current: ' . $order->status . ')'];
             }
 
-            // Get form data
+            // ── FIX: Read POST data from nested 'data' key (sent by JS) ──
             $formData = $_POST['data'] ?? $_POST;
             if (is_string($formData)) {
-                $formData = json_decode($formData, true) ?: [];
+                $formData = json_decode($formData, true) ?: $_POST;
             }
 
-            // ── Validate CSR ──
-            $csr = $formData['csr'] ?? '';
+            // Extract fields with fallbacks
+            $csr       = $formData['csr'] ?? $_POST['csr'] ?? '';
+            $dcvMethod = $formData['dcv_method'] ?? $formData['dcvMethod'] ?? $_POST['dcv_method'] ?? 'email';
+            $dcvEmail  = $formData['approver_email'] ?? $formData['approveremail'] ?? $_POST['dcv_email'] ?? '';
+            $isRenew   = $formData['isRenew'] ?? '0';
+
             if (empty($csr)) {
                 return ['success' => false, 'message' => 'CSR is required.'];
             }
 
-            if (strpos($csr, '-----BEGIN CERTIFICATE REQUEST-----') === false &&
-                strpos($csr, '-----BEGIN NEW CERTIFICATE REQUEST-----') === false) {
+            // Validate CSR format
+            if (strpos($csr, '-----BEGIN CERTIFICATE REQUEST-----') === false
+                && strpos($csr, '-----BEGIN NEW CERTIFICATE REQUEST-----') === false) {
                 return ['success' => false, 'message' => 'Invalid CSR format.'];
             }
 
             // ── Resolve provider ──
+            $provider = ProviderBridge::getProvider($serviceId);
+            $slug = $provider->getSlug();
+
+            // ── Resolve product code ──
+            // Chain: configdata → order fields → configoption1
             $configdata = OrderService::decodeConfigdata($order->configdata ?? '');
-            $slug = ProviderBridge::resolveSlugFromOrder($order);
+            $canonicalId = $configdata['canonical'] ?? $configdata['canonical_id']
+                ?? $order->canonical_id ?? $order->certtype ?? $params['configoption1'] ?? '';
 
-            if (empty($slug)) {
-                return ['success' => false, 'message' => 'Provider not configured.'];
-            }
+            $productCode = self::resolveProviderProductCode($canonicalId, $slug);
 
-            $provider = ProviderRegistry::get($slug);
-
-            // ── Build order params ──
-            $productCode = $order->certtype ?? $order->product_code
-                ?? $configdata['canonical'] ?? $params['configoption1'] ?? '';
-
-            // Billing cycle → period mapping
-            $hosting = Capsule::table('tblhosting')->find($serviceId);
-            $billingCycle = $hosting ? $hosting->billingcycle : 'Annually';
-
-            $periodMap = [
-                'Free Account'  => 1,
-                'One Time'      => 1,
-                'Monthly'       => 1,
-                'Quarterly'     => 1,
-                'Semi-Annually' => 1,
-                'Annually'      => 1,
-                'Biennially'    => 2,
-                'Triennially'   => 3,
-            ];
-            $period = $periodMap[$billingCycle] ?? 1;
-
-            // DCV method
-            $dcvMethod = $formData['dcv_method'] ?? $formData['dcvMethod'] ?? 'email';
-
-            // Domain info
-            $domains = $formData['domains'] ?? $formData['domainInfo'] ?? [];
-            if (empty($domains)) {
-                $domain = $order->domain ?? '';
-                if (!empty($domain)) {
-                    $domains = [['domainName' => $domain, 'dcvMethod' => $dcvMethod]];
-                }
-            }
-
-            // Approver email (for EMAIL DCV)
-            $approverEmail = $formData['approver_email'] ?? $formData['approveremail'] ?? '';
-
-            // Contact info (OV/EV)
-            $contacts = [];
-            if (!empty($formData['Administrator']) || !empty($formData['admin'])) {
-                $contacts['admin'] = $formData['Administrator'] ?? $formData['admin'] ?? [];
-                $contacts['tech']  = $formData['tech'] ?? $formData['Administrator'] ?? $contacts['admin'];
-            }
-
-            // Organization info (OV/EV)
-            $orgInfo = $formData['organizationInfo'] ?? $formData['org'] ?? [];
-
-            // ── Build provider-specific params ──
-            $orderParams = [
-                'product_code'   => $productCode,
-                'csr'            => $csr,
-                'period'         => $period,
-                'dcv_method'     => $dcvMethod,
-                'domains'        => $domains,
-                'approver_email' => $approverEmail,
-                'contacts'       => $contacts,
-                'org_info'       => $orgInfo,
-                'server_count'   => -1,
-            ];
-
-            // Store private key if generated locally
-            $privateKey = $formData['private_key'] ?? $configdata['private_key'] ?? '';
-
-            // ── Validate with provider ──
-            if (method_exists($provider, 'validateOrder')) {
-                $validation = $provider->validateOrder($orderParams);
-                if (!empty($validation['errors'])) {
-                    return [
-                        'success' => false,
-                        'message' => 'Validation failed: ' . implode(', ', $validation['errors']),
-                    ];
-                }
-            }
-
-            // ── Place order with provider ──
-            $result = $provider->placeOrder($orderParams);
-
-            if (empty($result['order_id']) && empty($result['success'])) {
+            if (empty($productCode)) {
                 return [
                     'success' => false,
-                    'message' => $result['message'] ?? 'Provider failed to place order.',
+                    'message' => "No product mapping found for canonical '{$canonicalId}' on provider '{$slug}'. "
+                               . "Go to AIO SSL Admin → Products → Mapping to configure.",
+                ];
+            }
+
+            // ── Extract domain from CSR ──
+            $csrSubject = openssl_csr_get_subject($csr, true);
+            $domain = $csrSubject['CN'] ?? $order->domain ?? '';
+
+            // Build domains array
+            $domains = [$domain];
+            $sanDomains = $formData['sanDomains'] ?? $formData['san_domains'] ?? [];
+            if (is_string($sanDomains)) {
+                $sanDomains = array_filter(array_map('trim', explode("\n", $sanDomains)));
+            }
+            if (is_array($sanDomains)) {
+                foreach ($sanDomains as $san) {
+                    $s = is_array($san) ? ($san['domainName'] ?? '') : trim($san);
+                    if (!empty($s) && !in_array($s, $domains)) {
+                        $domains[] = $s;
+                    }
+                }
+            }
+            // Also check domainInfo array from JS
+            $domainInfo = $formData['domainInfo'] ?? [];
+            if (is_array($domainInfo)) {
+                foreach ($domainInfo as $di) {
+                    $d = is_array($di) ? ($di['domainName'] ?? '') : '';
+                    if (!empty($d) && !in_array($d, $domains)) {
+                        $domains[] = $d;
+                    }
+                }
+            }
+
+            // ── Billing cycle → period ──
+            $hosting = \WHMCS\Database\Capsule::table('tblhosting')->find($serviceId);
+            $billing = $hosting ? $hosting->billingcycle : 'Annually';
+            $periodMap = [
+                'Free Account' => 1, 'One Time' => 1, 'Monthly' => 1,
+                'Quarterly' => 1, 'Semi-Annually' => 1, 'Annually' => 1,
+                'Biennially' => 2, 'Triennially' => 3,
+            ];
+            $period = $periodMap[$billing] ?? 1;
+
+            // ── Admin contact ──
+            $admin = $formData['Administrator'] ?? [];
+            $adminFirstName = $admin['firstName'] ?? $admin['first_name'] ?? $params['clientsdetails']['firstname'] ?? '';
+            $adminLastName  = $admin['lastName'] ?? $admin['last_name'] ?? $params['clientsdetails']['lastname'] ?? '';
+            $adminEmail     = $admin['email'] ?? $admin['Email'] ?? $params['clientsdetails']['email'] ?? '';
+            $adminPhone     = $admin['phone'] ?? $admin['Phone'] ?? $params['clientsdetails']['phonenumber'] ?? '';
+            $adminTitle     = $admin['jobTitle'] ?? $admin['title'] ?? 'Mr';
+            $adminOrg       = $admin['organization'] ?? $params['clientsdetails']['companyname'] ?? '';
+
+            // ── Build order params (matches ProviderInterface::placeOrder spec) ──
+            $orderParams = [
+                'product_code'       => $productCode,
+                'period'             => $period * 12, // months
+                'csr'                => $csr,
+                'server_count'       => -1,
+                'server_type'        => -1,
+                'dcv_method'         => $dcvMethod,
+                'dcv_email'          => $dcvEmail,
+                'approver_email'     => $dcvEmail,
+                'domains'            => $domains,
+                'is_renew'           => ($isRenew === '1'),
+
+                // Admin contact (flat keys for GoGetSSL compatibility)
+                'admin_firstname'    => $adminFirstName,
+                'admin_lastname'     => $adminLastName,
+                'admin_email'        => $adminEmail,
+                'admin_phone'        => $adminPhone,
+                'admin_title'        => $adminTitle,
+                'admin_organization' => $adminOrg,
+
+                // Structured contact (for NicSRS)
+                'admin_contact'      => [
+                    'first_name' => $adminFirstName,
+                    'last_name'  => $adminLastName,
+                    'email'      => $adminEmail,
+                    'phone'      => $adminPhone,
+                    'title'      => $adminTitle,
+                ],
+            ];
+
+            // OV/EV org info
+            $orgInfo = $formData['organizationInfo'] ?? [];
+            if (!empty($orgInfo['organizationName'])) {
+                $orderParams['org_info'] = [
+                    'name'    => $orgInfo['organizationName'] ?? '',
+                    'division'=> $orgInfo['organizationDivision'] ?? '',
+                    'address' => $orgInfo['organizationAddress'] ?? '',
+                    'city'    => $orgInfo['organizationCity'] ?? '',
+                    'state'   => $orgInfo['organizationState'] ?? '',
+                    'country' => $orgInfo['organizationCountry'] ?? '',
+                    'zip'     => $orgInfo['organizationPostCode'] ?? '',
+                    'phone'   => $orgInfo['organizationPhone'] ?? '',
+                ];
+            }
+
+            // ── Validate (optional — don't block on validation errors) ──
+            // Some providers don't have /validate endpoint, or it may fail
+            // for non-critical reasons. Log the result but proceed to placeOrder.
+            if (method_exists($provider, 'validateOrder')) {
+                try {
+                    $validation = $provider->validateOrder($orderParams);
+                    if (isset($validation['valid']) && !$validation['valid']) {
+                        $errors = $validation['errors'] ?? ['Unknown validation error'];
+                        // Log validation failure but DON'T block — let placeOrder decide
+                        logModuleCall('aio_ssl', 'submitApply_validation_warning', [
+                            'provider'   => $slug,
+                            'product'    => $productCode,
+                            'errors'     => $errors,
+                        ], 'Validation returned errors, proceeding to placeOrder anyway');
+                    }
+                } catch (\Exception $e) {
+                    // Validation endpoint may not exist — this is fine
+                    logModuleCall('aio_ssl', 'submitApply_validate_skip', [
+                        'provider' => $slug,
+                    ], 'validateOrder() exception: ' . $e->getMessage());
+                }
+            }
+
+            // ── Place order ──
+            $result = $provider->placeOrder($orderParams);
+
+            $remoteId = $result['order_id'] ?? $result['remote_id'] ?? $result['cert_id'] ?? '';
+
+            if (empty($remoteId) && empty($result['success'])) {
+                return [
+                    'success' => false,
+                    'message' => $result['message'] ?? $result['error'] ?? 'Provider failed to place order.',
                 ];
             }
 
             // ── Update order record ──
-            $remoteId = $result['order_id'] ?? $result['remote_id'] ?? '';
-
+            $privateKey = $formData['private_key'] ?? $configdata['private_key'] ?? '';
             $newConfigdata = array_merge($configdata, [
                 'provider'        => $slug,
+                'product_code'    => $productCode,
                 'csr'             => $csr,
                 'private_key'     => $privateKey,
                 'dcv_method'      => $dcvMethod,
-                'domains'         => $domains,
-                'contacts'        => $contacts,
-                'org_info'        => $orgInfo,
+                'dcv_email'       => $dcvEmail,
+                'isRenew'         => $isRenew,
+                'domainInfo'      => array_map(function($d) use ($dcvMethod) {
+                    return ['domainName' => $d, 'dcvMethod' => $dcvMethod];
+                }, $domains),
+                'Administrator'   => [
+                    'firstName' => $adminFirstName, 'lastName' => $adminLastName,
+                    'email' => $adminEmail, 'phone' => $adminPhone,
+                ],
+                'organizationInfo'=> $orgInfo,
                 'applyReturn'     => $result,
                 'submitted_at'    => date('Y-m-d H:i:s'),
                 'isDraft'         => false,
@@ -284,11 +353,12 @@ class ActionController
 
             $updateData = [
                 'status'     => 'Pending',
+                'domain'     => $domain,
                 'configdata' => json_encode($newConfigdata, JSON_UNESCAPED_UNICODE),
             ];
 
             // Set remote_id based on table
-            if (($order->_source_table ?? '') === 'mod_aio_ssl_orders') {
+            if (($order->_source_table ?? '') === OrderService::TABLE) {
                 $updateData['remote_id'] = $remoteId;
             } else {
                 $updateData['remoteid'] = $remoteId;
@@ -297,10 +367,12 @@ class ActionController
             ProviderBridge::updateOrder($order, $updateData);
 
             logModuleCall('aio_ssl', 'submitApply', [
-                'serviceid' => $serviceId,
-                'provider'  => $slug,
-                'product'   => $productCode,
-                'remote_id' => $remoteId,
+                'serviceid'    => $serviceId,
+                'provider'     => $slug,
+                'product'      => $productCode,
+                'remote_id'    => $remoteId,
+                'domain'       => $domain,
+                'domain_count' => count($domains),
             ], 'Order placed successfully');
 
             return [
@@ -310,14 +382,97 @@ class ActionController
                 'status'    => 'Pending',
             ];
 
-        } catch (UnsupportedOperationException $e) {
-            return ['success' => false, 'message' => $e->getMessage()];
         } catch (\Exception $e) {
-            logModuleCall('aio_ssl', 'submitApply_error', $params, $e->getMessage());
+            logModuleCall('aio_ssl', 'submitApply_error', [
+                'serviceid' => $params['serviceid'] ?? '',
+                'error'     => $e->getMessage(),
+                'POST_keys' => array_keys($_POST),
+            ], $e->getTraceAsString());
+
             return ['success' => false, 'message' => 'Submit failed: ' . $e->getMessage()];
         }
     }
 
+    // ═══════════════════════════════════════════════════════════════
+    // HELPER: Resolve provider-specific product code
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * Resolve provider-specific product code from canonical ID
+     *
+     * Resolution chain:
+     * 1. mod_aio_ssl_product_map.{provider}_code  ← PRIMARY (designed mapping)
+     * 2. mod_aio_ssl_products.product_code         ← SECONDARY (synced catalog)
+     * 3. null (fail — admin needs to configure mapping)
+     *
+     * NEVER use canonical_id as fallback — it's NOT a product code!
+     *
+     * @param string $canonicalId  e.g. "sectigo_positivessl_dv"
+     * @param string $providerSlug e.g. "nicsrs"
+     * @return string|null Provider product code or null
+     */
+    private static function resolveProviderProductCode(string $canonicalId, string $providerSlug): ?string
+    {
+        if (empty($canonicalId) || empty($providerSlug)) {
+            return null;
+        }
+
+        // Provider slug → column name in mod_aio_ssl_product_map
+        $columnMap = [
+            'nicsrs'      => 'nicsrs_code',
+            'gogetssl'    => 'gogetssl_code',
+            'thesslstore' => 'thesslstore_code',
+            'ssl2buy'     => 'ssl2buy_code',
+        ];
+
+        $column = $columnMap[$providerSlug] ?? null;
+
+        // ── Method 1: Product Map table (primary — admin-configured mapping) ──
+        if ($column) {
+            try {
+                $map = \WHMCS\Database\Capsule::table('mod_aio_ssl_product_map')
+                    ->where('canonical_id', $canonicalId)
+                    ->whereNotNull($column)
+                    ->where($column, '!=', '')
+                    ->first();
+
+                if ($map && !empty($map->$column)) {
+                    return $map->$column;
+                }
+            } catch (\Exception $e) {
+                logModuleCall('aio_ssl', 'resolveProductCode_map', [
+                    'canonical' => $canonicalId, 'provider' => $providerSlug,
+                ], $e->getMessage());
+            }
+        }
+
+        // ── Method 2: Products table (synced catalog with canonical_id set) ──
+        try {
+            $product = \WHMCS\Database\Capsule::table('mod_aio_ssl_products')
+                ->where('provider_slug', $providerSlug)
+                ->where('canonical_id', $canonicalId)
+                ->where('is_active', 1)
+                ->first();
+
+            if ($product && !empty($product->product_code)) {
+                return $product->product_code;
+            }
+        } catch (\Exception $e) {
+            logModuleCall('aio_ssl', 'resolveProductCode_products', [
+                'canonical' => $canonicalId, 'provider' => $providerSlug,
+            ], $e->getMessage());
+        }
+
+        // ── No mapping found ──
+        logModuleCall('aio_ssl', 'resolveProductCode_FAILED', [
+            'canonical' => $canonicalId,
+            'provider'  => $providerSlug,
+            'column'    => $column ?? 'unknown',
+        ], 'No product mapping found. Admin must configure in AIO SSL Admin → Products → Mapping.');
+
+        return null;
+    }
+        
     /**
      * Save application as draft
      */

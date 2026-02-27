@@ -6,9 +6,6 @@ use WHMCS\Database\Capsule;
 
 /**
  * PageDispatcher — Route client area pages by order status
- *
- * FIXED: Detect AIO orders via _source_table instead of module column
- * (mod_aio_ssl_orders has no 'module' column)
  */
 class PageDispatcher
 {
@@ -31,8 +28,6 @@ class PageDispatcher
         $commonVars = self::buildCommonVars($order, $configdata, $params);
 
         // ── Detect legacy vs AIO order ──
-        // FIX: Use _source_table (set by ProviderBridge::getOrder) instead of
-        // $order->module, because mod_aio_ssl_orders has no 'module' column.
         $sourceTable = $order->_source_table ?? '';
         $isAioOrder = ($sourceTable === OrderService::TABLE);
 
@@ -66,39 +61,55 @@ class PageDispatcher
         switch ($order->status) {
             case 'Awaiting Configuration':
             case 'Draft':
-                $draft = $configdata['draft'] ?? [];
+                $isDraft = !empty($configdata['isDraft']) || !empty($configdata['draft']);
                 return [
                     'templatefile' => 'applycert',
                     'vars' => array_merge($commonVars, [
-                        'draft'     => $draft,
-                        'hasDraft'  => !empty($draft),
-                        'draftStep' => $draft['step'] ?? 1,
+                        'draft'       => $configdata['draft'] ?? [],
+                        'hasDraft'    => $isDraft,
+                        'draftStep'   => $configdata['draft']['step'] ?? 1,
+                        'lastSaved'   => $configdata['lastSaved'] ?? '',
+                        'isRenew'     => $configdata['isRenew'] ?? '0',
                     ]),
                 ];
 
             case 'Pending':
             case 'Processing':
+                // Build DCV instruction data from configdata
+                $dcvInfo = $configdata['dcv_info'] ?? $configdata['applyReturn']['DCVInfo'] ?? [];
+                $domainInfo = $configdata['domainInfo'] ?? $configdata['domains'] ?? [];
                 return [
                     'templatefile' => 'pending',
                     'vars' => array_merge($commonVars, [
-                        'dcvStatus' => $configdata['dcv_status'] ?? [],
-                        'dcvMethod' => $configdata['dcv_method'] ?? 'email',
+                        'dcvStatus'   => $configdata['dcv_status'] ?? [],
+                        'dcvMethod'   => $configdata['dcv_method'] ?? 'email',
+                        'dcvInfo'     => $dcvInfo,
+                        'domainInfo'  => $domainInfo,
+                        'submittedAt' => $configdata['submitted_at'] ?? '',
+                        'certId'      => $order->remote_id ?? $order->remoteid ?? '',
+                        'hasPrivateKey' => !empty($configdata['private_key']),
                     ]),
                 ];
 
             case 'Completed':
             case 'Issued':
             case 'Active':
+                $hasCert = !empty($configdata['cert'])
+                    || !empty($configdata['applyReturn']['certificate']);
                 return [
                     'templatefile' => 'complete',
                     'vars' => array_merge($commonVars, [
-                        'hasCert'     => !empty($configdata['cert']),
-                        'beginDate'   => $configdata['begin_date'] ?? '',
-                        'endDate'     => $configdata['end_date'] ?? '',
-                        'canReissue'  => self::providerCan($providerSlug, 'reissue'),
-                        'canRenew'    => self::providerCan($providerSlug, 'renew'),
-                        'canRevoke'   => self::providerCan($providerSlug, 'revoke'),
-                        'canDownload' => self::providerCan($providerSlug, 'download'),
+                        'hasCert'       => $hasCert,
+                        'certificate'   => $configdata['cert']
+                            ?? $configdata['applyReturn']['certificate'] ?? '',
+                        'caCertificate' => $configdata['ca']
+                            ?? $configdata['applyReturn']['caCertificate'] ?? '',
+                        'hasPrivateKey' => !empty($configdata['private_key']),
+                        'certId'        => $order->remote_id ?? $order->remoteid ?? '',
+                        'canReissue'    => self::providerCan($providerSlug, 'reissue'),
+                        'canRenew'      => self::providerCan($providerSlug, 'renew'),
+                        'canRevoke'     => self::providerCan($providerSlug, 'revoke'),
+                        'canDownload'   => self::providerCan($providerSlug, 'download'),
                     ]),
                 ];
 
@@ -142,8 +153,6 @@ class PageDispatcher
 
     /**
      * Build common template variables
-     *
-     * FIXED: Handle both mod_aio_ssl_orders and tblsslorders field names
      */
     private static function buildCommonVars($order, array $configdata, array $params): array
     {

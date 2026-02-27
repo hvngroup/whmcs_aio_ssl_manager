@@ -249,6 +249,9 @@
             if (d) domains.push({ domainName: d, dcvMethod: data.dcv_method });
         });
         data.domainInfo = domains;
+        // Renewal flag
+        var renewRadio = document.querySelector('input[name="isRenew"]:checked');
+        data.isRenew = renewRadio ? renewRadio.value : '0';
         // Contacts
         data.Administrator = {
             firstName: val('adminFirstName'), lastName: val('adminLastName'),
